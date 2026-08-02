@@ -73,8 +73,9 @@ async function handleRegister() {
 <template>
   <div class="login-page">
     <div class="login-box">
-      <h1 class="login-title">Yu Agent</h1>
-      <p class="login-subtitle">智能体工作台</p>
+      <img class="login-logo" src="/agent.svg" alt="" />
+      <h1 class="login-title">Agentic RAG Assistant</h1>
+      <p class="login-subtitle">可观测、多工具、用户级知识隔离的智能体工作台</p>
 
       <el-tabs v-model="activeTab" class="login-tabs" @tab-change="errorMsg = ''">
         <el-tab-pane label="登录" name="login">
@@ -128,14 +129,22 @@ async function handleRegister() {
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #001529 0%, #003a70 100%);
+  padding: 24px;
 }
 
 .login-box {
   background: #fff;
   border-radius: 12px;
   padding: 40px 36px;
-  width: 380px;
+  width: min(100%, 420px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.login-logo {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 14px;
 }
 
 .login-title {
