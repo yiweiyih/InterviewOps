@@ -1,14 +1,31 @@
 <script setup>
-import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiUrl, authHeaders } from '../utils/api'
 
-const STORAGE_KEY = 'knowledge_files'
 const uploading = ref(false)
-const uploadedFiles = ref(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+const loading = ref(false)
+const uploadedFiles = ref([])
 const fileInput = ref(null)
 
 const ACCEPT = '.md,.markdown,.txt,.json'
+
+async function loadDocuments() {
+  loading.value = true
+  try {
+    const res = await fetch(apiUrl('/api/knowledge'), { headers: authHeaders() })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '知识库加载失败')
+    uploadedFiles.value = (data.documents || []).map(document => ({
+      ...document,
+      time: document.indexedAt ? new Date(document.indexedAt).toLocaleString() : '-'
+    }))
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    loading.value = false
+  }
+}
 
 async function handleUpload(e) {
   const file = e.target.files[0]
@@ -24,9 +41,7 @@ async function handleUpload(e) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error)
-    const record = { name: data.name, chunks: data.chunks, time: new Date().toLocaleString() }
-    uploadedFiles.value.unshift(record)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(uploadedFiles.value))
+    await loadDocuments()
     ElMessage.success(`「${data.name}」已建索引，共 ${data.chunks} 个片段`)
   } catch (err) {
     ElMessage.error(err.message)
@@ -36,10 +51,27 @@ async function handleUpload(e) {
   }
 }
 
-function removeFile(index) {
-  uploadedFiles.value.splice(index, 1)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(uploadedFiles.value))
+async function removeFile(document) {
+  try {
+    await ElMessageBox.confirm(`确定删除「${document.name}」及其全部向量索引吗？`, '删除知识文档', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    const res = await fetch(apiUrl(`/api/knowledge/${encodeURIComponent(document.name)}`), {
+      method: 'DELETE',
+      headers: authHeaders()
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '删除失败')
+    await loadDocuments()
+    ElMessage.success(`已删除「${document.name}」的 ${data.removedChunks} 个索引片段`)
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message || '删除失败')
+  }
 }
+
+onMounted(loadDocuments)
 </script>
 
 <template>
@@ -55,13 +87,13 @@ function removeFile(index) {
 
     <div v-if="uploadedFiles.length" class="file-list">
       <h3>已上传文件</h3>
-      <el-table :data="uploadedFiles" stripe>
+      <el-table v-loading="loading" :data="uploadedFiles" stripe>
         <el-table-column prop="name" label="文件名" />
         <el-table-column prop="chunks" label="片段数" width="100" />
         <el-table-column prop="time" label="上传时间" width="180" />
         <el-table-column label="操作" width="80">
-          <template #default="{ $index }">
-            <el-button type="danger" size="small" text @click="removeFile($index)">删除</el-button>
+          <template #default="{ row }">
+            <el-button type="danger" size="small" text @click="removeFile(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -7,7 +7,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { ingestFile, retrieve } = require('./rag/index');
+const { ingestFile, retrieve, listDocuments, deleteDocument } = require('./rag/index');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
 const { getLlmTools, validateToolArguments } = require('./tools/catalog');
 
@@ -245,6 +245,21 @@ const server = http.createServer((req, res) => {
         fs.unlink(req.file.path, () => {});
       }
     });
+  } else if (req.method === 'GET' && req.url === '/api/knowledge') {
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
+    sendJson(res, { documents: listDocuments(user.userId) });
+  } else if (req.method === 'DELETE' && req.url.startsWith('/api/knowledge/')) {
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
+    try {
+      const source = decodeURIComponent(req.url.slice('/api/knowledge/'.length).split('?')[0]);
+      const removedChunks = deleteDocument(user.userId, source);
+      if (removedChunks === 0) { sendJson(res, { error: '未找到该文档' }, 404); return; }
+      sendJson(res, { ok: true, name: source, removedChunks });
+    } catch (error) {
+      sendJson(res, { error: error.message }, 400);
+    }
   } else {
     res.statusCode = 404;
     res.end();
