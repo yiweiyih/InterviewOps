@@ -9,7 +9,9 @@
     "dev": "node index.js",
     "mcp": "node mcp-server.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check index.js && node --check mcp-server.js && node --check rag/index.js && node --check memory/index.js"
+    "check": "node --check index.js && node --check mcp-server.js && node --check rag/index.js && node --check memory/index.js && node --check evals/run-tool-routing.js",
+    "eval:tools": "node evals/run-tool-routing.js",
+    "eval:tools:dry": "node evals/run-tool-routing.js --dry-run"
   },
   "engines": {
     "node": ">=22.12.0 <25"

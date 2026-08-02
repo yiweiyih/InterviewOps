@@ -36,3 +36,4 @@ backend/notes*.json
 backend/memory/memory-store.json
 backend/rag/knowledge-store.json
 backend/rag/vector-index/
+backend/evals/results/

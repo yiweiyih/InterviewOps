@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "threshold": 0.8,
+  "cases": [
+    {
+      "id": "weather",
+      "prompt": "北京今天需要带伞吗？",
+      "expectedTools": ["get_weather"]
+    },
+    {
+      "id": "datetime",
+      "prompt": "现在是星期几？",
+      "expectedTools": ["get_datetime"]
+    },
+    {
+      "id": "add_todo",
+      "prompt": "帮我添加待办：周五晚上复习系统设计。",
+      "expectedTools": ["add_todo"]
+    },
+    {
+      "id": "list_todos",
+      "prompt": "查看我还有哪些待办没有完成。",
+      "expectedTools": ["get_todos"]
+    },
+    {
+      "id": "write_note",
+      "prompt": "记住：我的目标岗位是后端研发。",
+      "expectedTools": ["write_note"]
+    },
+    {
+      "id": "read_notes",
+      "prompt": "我之前让你记住过哪些事情？",
+      "expectedTools": ["read_notes"]
+    },
+    {
+      "id": "rag",
+      "prompt": "根据我上传的项目文档，总结 Agent 的执行流程并给出引用。",
+      "expectedTools": ["retrieve_knowledge"]
+    },
+    {
+      "id": "general_chat",
+      "prompt": "用一句话解释什么是事件循环。",
+      "expectedTools": []
+    }
+  ]
+}
