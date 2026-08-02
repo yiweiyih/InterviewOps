@@ -9,6 +9,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { ingestFile, retrieve } = require('./rag/index');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
+const { getLlmTools, validateToolArguments } = require('./tools/catalog');
 
 dotenv.config({ quiet: true });
 
@@ -77,8 +78,16 @@ function sendJson(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} 超过 ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // ── MCP Client ────────────────────────────────────────────
-function callMcpTool(toolName, args) {
+function callMcpTool(toolName, args, timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       jsonrpc: '2.0',
@@ -98,18 +107,21 @@ function callMcpTool(toolName, args) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        let json;
         try {
-          const json = JSON.parse(data);
-          if (json.error) return reject(new Error(json.error.message));
-          const text = json.result?.content?.[0]?.text;
-          resolve(JSON.parse(text));
-        } catch (e) {
-          reject(new Error('MCP 响应解析失败'));
+          json = JSON.parse(data);
+        } catch {
+          reject(new Error('MCP 返回了无效的 JSON 响应'));
+          return;
         }
+        if (json.error) return reject(new Error(json.error.message));
+        const text = json.result?.content?.[0]?.text;
+        try { resolve(JSON.parse(text)); }
+        catch { reject(new Error('MCP 工具结果解析失败')); }
       });
     });
     req.on('error', reject);
-    req.setTimeout(12000, () => { req.destroy(); reject(new Error('MCP 调用超时')); });
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error(`MCP 调用超过 ${timeoutMs}ms`)); });
     req.write(body);
     req.end();
   });
@@ -239,132 +251,8 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// DeepSeek Function Calling 工具定义
-const TOOLS_SCHEMA = [
-  {
-    type: 'function',
-    function: {
-      name: 'get_weather',
-      description: '查询指定城市的实时天气，包括温度、湿度、风速、天气状况等',
-      parameters: {
-        type: 'object',
-        properties: {
-          city: { type: 'string', description: '城市名称，如"北京"、"上海"、"盐城"' }
-        },
-        required: ['city']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'search_web',
-      description: '通过搜索引擎查询网络上的信息，适合查询人物、新闻、百科等内容',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: '搜索关键词，如"南京邮电大学 张三 教授"' }
-        },
-        required: ['query']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_todos',
-      description: '获取所有待办事项列表',
-      parameters: { type: 'object', properties: {} }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'add_todo',
-      description: '添加一条新的待办事项',
-      parameters: {
-        type: 'object',
-        properties: {
-          text: { type: 'string', description: '待办事项内容' }
-        },
-        required: ['text']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'delete_todo',
-      description: '删除指定ID的待办事项',
-      parameters: {
-        type: 'object',
-        properties: {
-          id: { type: 'number', description: '待办事项的ID' }
-        },
-        required: ['id']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'toggle_todo',
-      description: '切换待办事项的完成状态（完成↔未完成）',
-      parameters: {
-        type: 'object',
-        properties: {
-          id: { type: 'number', description: '待办事项的ID' }
-        },
-        required: ['id']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_datetime',
-      description: '获取当前日期、时间和星期，用于回答"现在几点"、"今天是几号"等时间相关问题',
-      parameters: { type: 'object', properties: {} }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'write_note',
-      description: '将重要信息保存为笔记，供以后回忆。适合用户说"记住xxx"、"帮我记录xxx"等场景',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: '笔记标题' },
-          text:  { type: 'string', description: '笔记正文内容' }
-        },
-        required: ['title', 'text']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'retrieve_knowledge',
-      description: '从本地知识库中检索与问题相关的文档片段，当用户询问已上传文档的内容时调用',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: '检索关键词或问题' }
-        },
-        required: ['query']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'read_notes',
-      description: '读取所有已保存的笔记，用于回答"你记得什么"、"我之前让你记住了什么"等问题',
-      parameters: { type: 'object', properties: {} }
-    }
-  }
-];
+// DeepSeek Function Calling 工具定义由统一目录生成，避免 API 与 MCP 漂移。
+const TOOLS_SCHEMA = getLlmTools();
 
 // ── 任务规划层 ────────────────────────────────────────────
 
@@ -621,6 +509,14 @@ async function handleWithFunctionCalling(messages, res, userId) {
     console.log(`[SSE] writeToolCall ${name} ${status}`);
     res.write(payload);
   }
+  function getToolInputSummary(toolCall) {
+    try {
+      const args = JSON.parse(toolCall.function.arguments || '{}');
+      return Object.values(args)[0] || '';
+    } catch {
+      return '';
+    }
+  }
 
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -650,15 +546,17 @@ async function handleWithFunctionCalling(messages, res, userId) {
       const settledResults = await Promise.allSettled(
         toolCalls.map(async (toolCall) => {
           const toolName = toolCall.function.name;
-          const toolArgs = JSON.parse(toolCall.function.arguments);
-          const USER_TOOLS = ['get_todos', 'add_todo', 'delete_todo', 'toggle_todo', 'write_note', 'read_notes'];
-          if (userId && USER_TOOLS.includes(toolName)) toolArgs.userId = userId;
-          const inputSummary = Object.values(toolArgs)[0] || '';
+          const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+          const definition = validateToolArguments(toolName, toolArgs);
+          const inputSummary = getToolInputSummary(toolCall);
+          if (definition.scope === 'user') {
+            if (!userId) throw new Error(`工具 ${toolName} 需要登录用户`);
+            toolArgs.userId = userId;
+          }
           writeToolCall(toolName, 'running', inputSummary, null);
-          // retrieve_knowledge 直接走本地 RAG，不经过 MCP
-          const result = toolName === 'retrieve_knowledge'
-            ? await retrieve(toolArgs.query, 3, userId)
-            : await callMcpTool(toolName, toolArgs);
+          const result = definition.transport === 'local'
+            ? await withTimeout(retrieve(toolArgs.query, 3, userId), definition.timeoutMs, `工具 ${toolName}`)
+            : await callMcpTool(toolName, toolArgs, definition.timeoutMs);
           // 收集 RAG 引用
           if (toolName === 'retrieve_knowledge' && Array.isArray(result)) {
             citations.push(...result);
@@ -692,6 +590,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
           return settled.value;
         } else {
           console.warn(`[Agent] 工具 ${toolName} 失败:`, settled.reason?.message);
+          writeToolCall(toolName, 'error', getToolInputSummary(toolCalls[i]), settled.reason?.message || '执行失败');
           return {
             tool_call_id: toolCalls[i].id,
             content: JSON.stringify({ error: `工具 ${toolName} 执行失败: ${settled.reason?.message}` })
