@@ -22,6 +22,38 @@ function saveStore(chunks) {
   fs.renameSync(tempPath, STORE_PATH);
 }
 
+function summarizeDocuments(store, userId) {
+  const documents = new Map();
+  for (const item of store) {
+    if (item.userId !== userId) continue;
+    const current = documents.get(item.source) || {
+      name: item.source,
+      chunks: 0,
+      indexedAt: item.indexedAt || null
+    };
+    current.chunks += 1;
+    if (item.indexedAt && (!current.indexedAt || item.indexedAt > current.indexedAt)) {
+      current.indexedAt = item.indexedAt;
+    }
+    documents.set(item.source, current);
+  }
+  return [...documents.values()].sort((a, b) => (b.indexedAt || '').localeCompare(a.indexedAt || ''));
+}
+
+function listDocuments(userId) {
+  if (!userId) return [];
+  return summarizeDocuments(loadStore(), userId);
+}
+
+function deleteDocument(userId, source) {
+  if (!userId || !source) throw new Error('缺少用户身份或文档名称');
+  const store = loadStore();
+  const nextStore = store.filter(item => !(item.userId === userId && item.source === source));
+  const removedChunks = store.length - nextStore.length;
+  if (removedChunks > 0) saveStore(nextStore);
+  return removedChunks;
+}
+
 function chunkText(text, chunkSize = 500, overlap = 50) {
   if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
     throw new RangeError('chunkSize 必须是正整数');
@@ -119,4 +151,12 @@ async function retrieve(query, topK = 3, userId) {
     .filter(r => r.score > 0.3);
 }
 
-module.exports = { ingestFile, retrieve, chunkText, cosineSimilarity };
+module.exports = {
+  ingestFile,
+  retrieve,
+  listDocuments,
+  deleteDocument,
+  summarizeDocuments,
+  chunkText,
+  cosineSimilarity
+};
