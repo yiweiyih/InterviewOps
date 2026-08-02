@@ -29,9 +29,9 @@ const showStarter = computed(() => {
 })
 
 const starterPrompts = [
-  { label: '多工具编排', title: '查询北京天气并生成今日出行待办', query: '查询北京今天的天气，并根据天气情况帮我生成一份今日出行待办。' },
-  { label: '知识库问答', title: '基于我的文档回答并标注来源', query: '请检索我的知识库，总结最重要的三点，并标注引用来源。' },
-  { label: '任务执行', title: '拆解目标并写入任务中心', query: '把“本周完成项目面试准备”拆成可执行的待办事项，并添加到任务中心。' }
+  { label: '项目深挖', title: '基于项目资料生成高频追问', query: '请检索我的项目资料，像技术面试官一样提出 5 个由浅入深的追问，并说明每题在考察什么。' },
+  { label: '表达诊断', title: '把项目介绍改成证据化表达', query: '请基于我的简历，帮我诊断项目介绍是否说清楚了问题、方案、取舍、个人贡献和结果，并标注引用来源。' },
+  { label: '行动计划', title: '把薄弱点拆成一周提升计划', query: '根据我的面试目标，把本周的准备拆成具体、可验收的行动，并添加到提升计划。' }
 ]
 
 let abortController = null
@@ -231,9 +231,9 @@ onMounted(() => {
     </div>
 
     <section v-if="showStarter" class="starter-panel">
-      <div class="starter-badge"><span></span> AGENT READY</div>
-      <h2>从一个真实任务开始</h2>
-      <p>Agent 会自主选择工具、检索你的私有知识，并在执行过程中展示调用状态和引用来源。</p>
+      <div class="starter-badge"><span></span> INTERVIEW COACH READY</div>
+      <h2>让教练先理解你的真实经历</h2>
+      <p>教练会检索你的私有面试资料、标明引用来源，并把泛泛的建议转成可执行的备战动作。</p>
       <div class="prompt-grid">
         <button v-for="prompt in starterPrompts" :key="prompt.label" class="prompt-card" @click="inputMessage = prompt.query">
           <span>{{ prompt.label }}</span>
@@ -242,7 +242,7 @@ onMounted(() => {
         </button>
       </div>
       <div class="governance-line">
-        <span>参数校验</span><i></i><span>身份隔离</span><i></i><span>超时降级</span><i></i><span>全链路指标</span>
+        <span>资料有引用</span><i></i><span>经历不编造</span><i></i><span>工具可追踪</span><i></i><span>行动可执行</span>
       </div>
     </section>
 
@@ -300,18 +300,18 @@ onMounted(() => {
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
       </div>
-      <span class="typing-text">Agent 正在规划并执行任务…</span>
+      <span class="typing-text">备战教练正在检索资料并组织建议…</span>
     </div>
 
     <div class="input-area">
       <div class="composer">
-        <el-input v-model="inputMessage" placeholder="描述你想完成的任务，Agent 会自动规划并选择工具…" @keyup.enter.exact="sendMessage" :disabled="isGenerating"
+        <el-input v-model="inputMessage" placeholder="输入你想准备的问题，例如：帮我深挖简历中的 RAG 项目…" @keyup.enter.exact="sendMessage" :disabled="isGenerating"
           type="textarea" :rows="2" resize="none" />
         <div class="composer-footer">
           <span>Enter 发送 · Shift + Enter 换行 · 支持中途停止</span>
           <el-button v-if="!isGenerating" type="primary" @click="sendMessage"
             :disabled="!inputMessage.trim()" :icon="ChatDotRound">
-            交给 Agent
+            交给教练
           </el-button>
           <el-button v-else type="danger" @click="handleStop" :icon="Close">
             停止生成

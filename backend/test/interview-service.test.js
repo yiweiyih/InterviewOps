@@ -1,0 +1,62 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { createInterviewService, toPublicSession } = require('../interview/service');
+
+test('interview service completes a scored session without sharing user data', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
+  let callCount = 0;
+  const callJson = async () => {
+    callCount += 1;
+    if (callCount === 1 || callCount === 3) {
+      return { choices: [{ message: { content: JSON.stringify({
+        text: callCount === 1 ? '请介绍项目里最关键的技术取舍。' : '你如何验证这个取舍有效？',
+        competency: '技术决策',
+        expectedSignals: ['背景', '取舍', '结果']
+      }) } }] };
+    }
+    return { choices: [{ message: { content: JSON.stringify({
+      scores: { problem: 4, depth: 4, ownership: 5, communication: 4 },
+      summary: '能够说明个人决策',
+      evidence: ['我负责设计检索链路'],
+      strengths: ['个人贡献明确'],
+      missingPoints: ['补充线上指标'],
+      betterStructure: '问题—方案—取舍—结果'
+    }) } }] };
+  };
+
+  try {
+    const service = createInterviewService({
+      dataDir: tempDir,
+      callJson,
+      retrieveKnowledge: async () => [{ source: 'project.md', text: '项目资料' }]
+    });
+    const session = await service.startSession('user-a', { mode: 'project', questionCount: 2 });
+    assert.equal(session.contextSources[0], 'project.md');
+    assert.equal(session.currentQuestion.expectedSignals.length, 3);
+    assert.equal('expectedSignals' in toPublicSession(session).currentQuestion, false);
+
+    const afterFirstAnswer = await service.answerSession(
+      'user-a',
+      session.id,
+      '我负责设计检索链路，先用简单循环建立基线，再通过回归用例验证路由和隔离边界。'
+    );
+    assert.equal(afterFirstAnswer.status, 'active');
+    assert.equal(afterFirstAnswer.turns.length, 1);
+    assert.match(afterFirstAnswer.currentQuestion.text, /如何验证/);
+
+    const completed = await service.answerSession(
+      'user-a',
+      session.id,
+      '我建立固定离线集并记录准确率、延迟和失败率，同时保留原始回答证据，避免把未采集的数据写成结果。'
+    );
+    assert.equal(completed.status, 'completed');
+    assert.equal(completed.report.overallScore, 85);
+    assert.equal(completed.turns.length, 2);
+    assert.equal(service.listSessions('user-b').length, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

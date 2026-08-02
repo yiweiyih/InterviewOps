@@ -3,6 +3,8 @@
 后端包含两个独立进程：
 
 - `index.js`：HTTP API、JWT 鉴权、Agent Loop、SSE、RAG/Memory 调用和指标。
+- `interview/`：候选人画像、动态追问、结构化评分、复盘聚合和用户级持久化。
+- `documents/`：DOCX、PDF 与文本资料的纯文本解析。
 - `mcp-server.js`：JSON-RPC 工具服务，承载天气、搜索、待办、笔记和时间工具。
 
 完整的架构、启动和验证说明见仓库根目录 [README](../README.md)。
@@ -34,6 +36,7 @@ npm run dev   # terminal 2, :3001
 ```bash
 npm run check
 npm test
+npm run eval:interview
 npm run eval:tools:dry
 ```
 

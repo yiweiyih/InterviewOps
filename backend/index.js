@@ -8,6 +8,9 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { ingestFile, retrieve, listDocuments, deleteDocument } = require('./rag/index');
+const { isSupportedDocument } = require('./documents/extract-text');
+const { createInterviewService } = require('./interview/service');
+const { createInterviewHandler } = require('./interview/routes');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
 const { getLlmTools, validateToolArguments } = require('./tools/catalog');
 const {
@@ -57,9 +60,8 @@ const upload = multer({
   dest: path.join(DATA_DIR, 'uploads'),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, callback) => {
-    const allowedExtensions = new Set(['.md', '.markdown', '.txt', '.json']);
-    const extension = path.extname(file.originalname).toLowerCase();
-    callback(extension && allowedExtensions.has(extension) ? null : new Error('仅支持 md、markdown、txt、json 文件'), allowedExtensions.has(extension));
+    const allowed = isSupportedDocument(file.originalname);
+    callback(allowed ? null : new Error('仅支持 DOCX、PDF、Markdown、TXT、JSON 文件'), allowed);
   }
 });
 
@@ -68,7 +70,7 @@ const PORT = Number(process.env.PORT || 3001);
 const API_BASE_URL = requiredEnv('DEEPSEEK_BASE_URL');
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:3002';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
-const SERVICE_VERSION = '1.0.0';
+const SERVICE_VERSION = '2.0.0';
 
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
   throw new Error('PORT 必须是 1 到 65535 之间的整数');
@@ -115,6 +117,18 @@ async function observeLlm(operation, request) {
   }
 }
 
+const interviewService = createInterviewService({
+  dataDir: DATA_DIR,
+  callJson: messages => observeLlm('interview', () => callDeepSeekJSON(messages)),
+  retrieveKnowledge: retrieve
+});
+const handleInterviewRequest = createInterviewHandler({
+  service: interviewService,
+  verifyToken,
+  readBody,
+  sendJson
+});
+
 // ── MCP Client ────────────────────────────────────────────
 function callMcpTool(toolName, args, timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
@@ -157,7 +171,7 @@ function callMcpTool(toolName, args, timeoutMs = 12000) {
 }
 
 // 创建与简化版服务器完全相同的HTTP服务器
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const requestStartedAt = performance.now();
   const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   res.setHeader('X-Request-Id', requestId);
@@ -171,7 +185,7 @@ const server = http.createServer((req, res) => {
   });
   // 设置CORS头
   res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE, PATCH');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE, PATCH, PUT');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-Id');
   
   // 处理OPTIONS请求
@@ -180,6 +194,8 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
+
+  if (await handleInterviewRequest(req, res)) return;
   
   // 只处理POST请求到/api/chat
   if (req.method === 'POST' && req.url === '/api/chat') {
@@ -208,7 +224,7 @@ const server = http.createServer((req, res) => {
   } else if (req.method === 'GET' && req.url === '/health') {
     sendJson(res, {
       status: 'ok',
-      service: 'agentic-rag-api',
+      service: 'interviewops-api',
       version: SERVICE_VERSION,
       timestamp: new Date().toISOString()
     });
@@ -220,6 +236,7 @@ const server = http.createServer((req, res) => {
     const user = verifyToken(req);
     if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
     sendJson(res, {
+      interview: interviewService.getSummary(user.userId),
       service: { status: 'ok', version: SERVICE_VERSION, uptimeSeconds: Math.round(process.uptime()) },
       tools: { total: TOOLS_SCHEMA.length },
       knowledge: { documents: listDocuments(user.userId).length },
@@ -288,8 +305,9 @@ const server = http.createServer((req, res) => {
       if (!req.file) return sendJson(res, { error: '请选择要上传的文件' }, 400);
       try {
         const fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf-8');
-        const count = await ingestFile(req.file.path, fileName, user.userId);
-        sendJson(res, { ok: true, chunks: count, name: fileName });
+        const category = String(req.body?.category || 'other').trim().slice(0, 30);
+        const count = await ingestFile(req.file.path, fileName, user.userId, { category });
+        sendJson(res, { ok: true, chunks: count, name: fileName, category });
       } catch (e) {
         sendJson(res, { error: e.message }, 500);
       } finally {
@@ -535,7 +553,16 @@ async function handleWithFunctionCalling(messages, res, userId) {
 
   const systemMessage = {
     role: 'system',
-    content: '你是一个智能助手。你拥有以下工具：查询天气(get_weather)、网络搜索(search_web)、待办管理(get_todos/add_todo/delete_todo/toggle_todo)、获取当前时间(get_datetime)、保存笔记(write_note)、读取笔记(read_notes)、知识库检索(retrieve_knowledge)。规则：1.用户询问时间、日期、星期时必须调用get_datetime，不能凭自身知识回答。2.用户提到任何城市的天气、气温、是否下雨、要不要带伞、出行穿什么等与天气相关的问题时，必须调用get_weather，不得凭自身知识回答。3.如果你在上一轮询问了用户城市名称，用户回复了城市名，必须立即调用get_weather查询该城市天气，不得直接回答。4.用户要求添加、删除、完成、查看待办事项时，必须调用对应的待办工具(add_todo/delete_todo/toggle_todo/get_todos)，不得凭上下文记忆直接回答，每次操作都必须实际调用工具。5.用户询问已上传文档内容时必须调用retrieve_knowledge，并在回答中注明引用来源。6.需要实时信息时必须调用对应工具，不得自行编造。' + memoryContext
+    content: `你是 InterviewOps 面试备战教练，帮助用户在面试前训练、在练习后复盘。你的价值不是给套话，而是结合简历、JD、项目资料找到证据缺口并形成下一步行动。
+边界：只服务于面试准备和事后复盘，不帮助用户在真实面试中实时作弊或冒充本人作答。
+可用工具：网络搜索(search_web)、待办管理(get_todos/add_todo/delete_todo/toggle_todo)、当前时间(get_datetime)、笔记(write_note/read_notes)、资料检索(retrieve_knowledge)，以及通用天气工具(get_weather)。
+规则：
+1. 用户询问已上传的简历、JD、项目或复盘记录时，必须调用 retrieve_knowledge，并在回答中注明来源。
+2. 制定提升计划时应把清晰、可执行的行动项写入待办；所有待办操作都必须实际调用对应工具。
+3. 需要公司、岗位或行业的实时信息时调用 search_web，不得编造。
+4. 反馈必须区分“回答中已有的事实”和“建议补充的信息”，不得替用户虚构指标或经历。
+5. 回答优先使用 STAR、问题-方案-取舍-结果、定义-原理-场景等适合面试表达的结构。
+6. 时间、天气等通用请求仍需调用对应工具。${memoryContext}`
   };
 
   let loopMessages = [systemMessage, ...messages].filter(

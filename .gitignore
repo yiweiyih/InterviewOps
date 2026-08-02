@@ -38,3 +38,6 @@ backend/rag/knowledge-store.json
 backend/rag/vector-index/
 backend/evals/results/
 backend/data/
+backend/interview-data/
+# Legacy runtime location used before interview-data was separated from source.
+backend/interview/*.json

@@ -73,9 +73,9 @@ async function handleRegister() {
 <template>
   <div class="login-page">
     <div class="login-box">
-      <img class="login-logo" src="/agent.svg" alt="" />
-      <h1 class="login-title">Agentic RAG Assistant</h1>
-      <p class="login-subtitle">可观测、多工具、用户级知识隔离的智能体工作台</p>
+      <span class="login-logo">IO</span>
+      <h1 class="login-title">InterviewOps</h1>
+      <p class="login-subtitle">从目标岗位到模拟追问，再到证据化复盘</p>
 
       <el-tabs v-model="activeTab" class="login-tabs" @tab-change="errorMsg = ''">
         <el-tab-pane label="登录" name="login">
@@ -128,23 +128,31 @@ async function handleRegister() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #001529 0%, #003a70 100%);
+  background: radial-gradient(circle at 18% 20%, rgba(112,100,239,.34), transparent 28%), linear-gradient(135deg, #18182f 0%, #312d69 66%, #1d5b61 100%);
   padding: 24px;
 }
 
 .login-box {
   background: #fff;
-  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 20px;
   padding: 40px 36px;
   width: min(100%, 420px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 .login-logo {
-  display: block;
+  display: grid;
+  place-items: center;
   width: 48px;
   height: 48px;
   margin: 0 auto 14px;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(145deg,#7167ef,#4e43cb);
+  box-shadow: 0 10px 24px rgba(86,74,220,.3);
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .login-title {
