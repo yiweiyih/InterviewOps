@@ -227,9 +227,9 @@ onMounted(() => {
               <span class="tool-name">{{ item.name }}</span>
               <span v-if="item.input" class="tool-input">{{ item.input }}</span>
               <span :class="['tool-status', item.status]">
-                {{ item.status === 'running' ? '执行中...' : '完成' }}
+                {{ item.status === 'running' ? '执行中...' : item.status === 'error' ? '失败' : '完成' }}
               </span>
-              <span v-if="item.result && item.status === 'done'" class="tool-result">{{ item.result }}</span>
+              <span v-if="item.result && item.status !== 'running'" class="tool-result">{{ item.result }}</span>
             </div>
             <Suspense v-else-if="item.role === 'assistant'">
               <template #default>
@@ -545,6 +545,7 @@ onMounted(() => {
   animation: pulse 1.2s infinite;
 }
 .tool-status.done { color: #16a34a; }
+.tool-status.error { color: #dc2626; }
 
 .tool-result {
   width: 100%;

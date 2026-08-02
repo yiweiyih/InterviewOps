@@ -2,6 +2,7 @@ const express = require('express');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const { getMcpTools, validateToolArguments } = require('./tools/catalog');
 
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
@@ -38,96 +39,7 @@ function writeNotes(userId, notes) {
 }
 
 // ── 工具定义 ──────────────────────────────────────────────
-const TOOLS = [
-  {
-    name: 'get_weather',
-    description: '查询指定城市的实时天气信息，返回温度、湿度、天气状况等数据',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        city: {
-          type: 'string',
-          description: '城市名称，支持中文或英文，如"北京"或"Beijing"'
-        }
-      },
-      required: ['city']
-    }
-  },
-  {
-    name: 'search_web',
-    description: '通过搜索引擎查询网络上的信息，适合查询人物、新闻、百科等内容',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: '搜索关键词，如"南京邮电大学 张三 教授"'
-        }
-      },
-      required: ['query']
-    }
-  },
-  {
-    name: 'get_todos',
-    description: '获取所有待办事项列表',
-    inputSchema: { type: 'object', properties: {} }
-  },
-  {
-    name: 'add_todo',
-    description: '添加一条新的待办事项',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', description: '待办事项内容' }
-      },
-      required: ['text']
-    }
-  },
-  {
-    name: 'delete_todo',
-    description: '删除指定ID的待办事项',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: '待办事项的ID' }
-      },
-      required: ['id']
-    }
-  },
-  {
-    name: 'toggle_todo',
-    description: '切换待办事项的完成状态（完成↔未完成）',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: '待办事项的ID' }
-      },
-      required: ['id']
-    }
-  },
-  {
-    name: 'get_datetime',
-    description: '获取当前日期、时间和星期，用于回答"现在几点"、"今天是几号"等时间相关问题',
-    inputSchema: { type: 'object', properties: {} }
-  },
-  {
-    name: 'write_note',
-    description: '将重要信息保存为笔记，供以后回忆。适合用户说"记住xxx"、"帮我记录xxx"等场景',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: '笔记标题，简短概括内容' },
-        text:  { type: 'string', description: '笔记正文内容' }
-      },
-      required: ['title', 'text']
-    }
-  },
-  {
-    name: 'read_notes',
-    description: '读取所有已保存的笔记，用于回答"你记得什么"、"我之前让你记住了什么"等问题',
-    inputSchema: { type: 'object', properties: {} }
-  }
-];
+const TOOLS = getMcpTools();
 
 // ── 网络搜索 ──────────────────────────────────────────────
 function searchWeb(query) {
@@ -225,7 +137,9 @@ async function handleRpc(method, params) {
       return { tools: TOOLS };
 
     case 'tools/call': {
-      const { name, arguments: args } = params || {};
+      const { name, arguments: rawArgs } = params || {};
+      const args = rawArgs || {};
+      validateToolArguments(name, args, { allowInternal: true });
       if (name === 'get_weather') {
         if (!args?.city) throw { code: -32602, message: '缺少参数: city' };
         console.log(`[MCP] 调用 get_weather，城市: ${args.city}`);
