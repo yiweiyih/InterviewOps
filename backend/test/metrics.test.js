@@ -7,6 +7,7 @@ const {
   recordRag,
   recordLlm,
   renderPrometheus,
+  getMetricsSummary,
   resetMetrics
 } = require('../observability/metrics');
 
@@ -38,4 +39,11 @@ test('renders HTTP, tool and RAG metrics without user data', () => {
   assert.match(output, /agentic_llm_input_tokens_total 20/);
   assert.match(output, /agentic_llm_output_tokens_total 5/);
   assert.doesNotMatch(output, /userId/);
+
+  assert.deepEqual(getMetricsSummary(), {
+    httpRequests: 1,
+    toolExecutions: { total: 1, success: 1, error: 0 },
+    rag: { queries: 1, hits: 1, misses: 0, errors: 0, results: 3 },
+    llm: { total: 1, success: 1, error: 0, inputTokens: 20, outputTokens: 5 }
+  });
 });

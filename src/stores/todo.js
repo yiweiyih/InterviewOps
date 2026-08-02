@@ -21,6 +21,7 @@ export const useTodoStore = defineStore('todo', () => {
     try {
       const res = await fetch(apiUrl('/api/todos'), { headers: authHeaders() })
       const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '任务加载失败')
       todos.value = data.todos || []
     } finally {
       loading.value = false
@@ -36,12 +37,14 @@ export const useTodoStore = defineStore('todo', () => {
       body: JSON.stringify({ text: trimmedText })
     })
     const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '添加任务失败')
     todos.value = data.todos || []
   }
 
   async function deleteTodo(id) {
     const res = await fetch(apiUrl(`/api/todos/${id}`), { method: 'DELETE', headers: authHeaders() })
     const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '删除任务失败')
     todos.value = data.todos || []
     selectedTodoIds.value.delete(id)
   }
@@ -49,6 +52,7 @@ export const useTodoStore = defineStore('todo', () => {
   async function toggleTodo(id) {
     const res = await fetch(apiUrl(`/api/todos/${id}/toggle`), { method: 'PATCH', headers: authHeaders() })
     const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '更新任务失败')
     todos.value = data.todos || []
   }
 

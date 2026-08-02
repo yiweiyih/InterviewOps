@@ -16,7 +16,8 @@ const {
   recordTool,
   recordRag,
   recordLlm,
-  renderPrometheus
+  renderPrometheus,
+  getMetricsSummary
 } = require('./observability/metrics');
 
 dotenv.config({ quiet: true });
@@ -212,6 +213,15 @@ const server = http.createServer((req, res) => {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
     res.end(renderPrometheus());
+  } else if (req.method === 'GET' && req.url === '/api/dashboard') {
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
+    sendJson(res, {
+      service: { status: 'ok', version: SERVICE_VERSION, uptimeSeconds: Math.round(process.uptime()) },
+      tools: { total: TOOLS_SCHEMA.length },
+      knowledge: { documents: listDocuments(user.userId).length },
+      metrics: getMetricsSummary()
+    });
   } else if (req.method === 'POST' && req.url === '/api/register') {
     readBody(req).then(async (body) => {
       const { username, password } = body;

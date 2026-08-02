@@ -2,18 +2,20 @@
 import {
   HomeFilled,
   List,
-  Setting,
   ChatRound,
   Collection,
   UserFilled
 } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useChatStore } from './stores/chat'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
+const isAuthLayout = computed(() => route.meta.layout === 'auth')
 
 function handleCommand(cmd) {
   if (cmd === 'logout') {
@@ -25,33 +27,38 @@ function handleCommand(cmd) {
 </script>
 
 <template>
-  <div class="app-container">
+  <router-view v-if="isAuthLayout" />
+  <div v-else class="app-container">
     <el-container style="height: 100vh;">
       <el-aside width="200px" style="background-color: #001529;">
         <div class="logo-container">
-          <h1 class="logo-text">Yu Agent</h1>
+          <img class="logo-mark" src="/agent.svg" alt="" />
+          <div>
+            <h1 class="logo-text">Agentic RAG</h1>
+            <p class="logo-caption">Operations Console</p>
+          </div>
         </div>
 
-        <el-menu default-active="/" class="sidebar-menu" background-color="#001529" text-color="#fff"
+        <el-menu :default-active="route.path" class="sidebar-menu" background-color="#001529" text-color="#fff"
           active-text-color="#ffd04b" router>
           <el-menu-item index="/">
             <template #title>
               <el-icon><HomeFilled /></el-icon>
-              <span>首页</span>
+              <span>工作台</span>
             </template>
           </el-menu-item>
 
           <el-menu-item index="/todo">
             <template #title>
               <el-icon><List /></el-icon>
-              <span>待办列表</span>
+              <span>任务中心</span>
             </template>
           </el-menu-item>
 
           <el-menu-item index="/ai">
             <template #title>
               <el-icon><ChatRound /></el-icon>
-              <span>AI对话</span>
+              <span>Agent 对话</span>
             </template>
           </el-menu-item>
 
@@ -67,9 +74,10 @@ function handleCommand(cmd) {
       <el-container>
         <el-header
           style="background-color: #fff; border-bottom: 1px solid #e6e6e6; display: flex; align-items: center; padding: 0 20px;">
-          <div style="flex: 1;"></div>
-          <h2>Yu Agent · 智能体工作台</h2>
-          <div style="flex: 1;"></div>
+          <div class="page-heading">
+            <span class="page-eyebrow">AGENTIC RAG ASSISTANT</span>
+            <h2>{{ route.meta.title }}</h2>
+          </div>
           <div class="user-info">
             <el-dropdown @command="handleCommand">
               <span class="el-dropdown-link">
@@ -104,20 +112,28 @@ function handleCommand(cmd) {
 html,
 body {
   height: 100%;
-  font-family: Arial, sans-serif;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #162033;
 }
 
 .app-container {
   height: 100%;
 }
 
+.app-container > .el-container,
+.app-container > .el-container > .el-container,
+.app-container .el-main {
+  min-width: 0;
+}
+
 /* 侧边栏样式 */
 .logo-container {
-  padding: 0;
+  padding: 0 18px;
   height: 60px;
   width: 100%;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 10px;
   align-items: center;
   border-bottom: 1px solid #1f2d3d;
 }
@@ -127,7 +143,20 @@ body {
   font-size: 18px;
   font-weight: 600;
   margin: 0;
-  text-align: center;
+  text-align: left;
+  line-height: 1.1;
+}
+
+.logo-mark {
+  width: 30px;
+  height: 30px;
+}
+
+.logo-caption {
+  color: #7f9bb3;
+  font-size: 9px;
+  letter-spacing: .08em;
+  margin-top: 3px;
 }
 
 .sidebar-menu {
@@ -139,6 +168,25 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.page-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.page-heading h2 {
+  color: #162033;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.page-eyebrow {
+  display: block;
+  color: #8492a6;
+  font-size: 9px;
+  letter-spacing: .14em;
+  margin-bottom: 2px;
 }
 
 /* 主内容区域样式 */

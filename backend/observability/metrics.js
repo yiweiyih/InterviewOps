@@ -129,6 +129,41 @@ function renderPrometheus() {
   return `${lines.join('\n')}\n`;
 }
 
+function getMetricsSummary() {
+  const toolExecutions = { total: 0, success: 0, error: 0 };
+  for (const [key, count] of toolCounters) {
+    const [, status] = JSON.parse(key);
+    toolExecutions.total += count;
+    if (status === 'success') toolExecutions.success += count;
+    if (status === 'error') toolExecutions.error += count;
+  }
+
+  const llmCalls = { total: 0, success: 0, error: 0 };
+  for (const [key, count] of llmCounters) {
+    const [, status] = JSON.parse(key);
+    llmCalls.total += count;
+    if (status === 'success') llmCalls.success += count;
+    if (status === 'error') llmCalls.error += count;
+  }
+
+  return {
+    httpRequests: [...httpCounters.values()].reduce((sum, count) => sum + count, 0),
+    toolExecutions,
+    rag: {
+      queries: [...ragCounters.values()].reduce((sum, count) => sum + count, 0),
+      hits: ragCounters.get('hit') || 0,
+      misses: ragCounters.get('miss') || 0,
+      errors: ragCounters.get('error') || 0,
+      results: ragResultsTotal
+    },
+    llm: {
+      ...llmCalls,
+      inputTokens: llmInputTokensTotal,
+      outputTokens: llmOutputTokensTotal
+    }
+  };
+}
+
 function resetMetrics() {
   httpCounters.clear();
   httpDurations.clear();
@@ -150,5 +185,6 @@ module.exports = {
   recordRag,
   recordLlm,
   renderPrometheus,
+  getMetricsSummary,
   resetMetrics
 };
