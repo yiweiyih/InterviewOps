@@ -1,14 +1,25 @@
 {
-  "name": "yuan-chat-vue",
+  "name": "agentic-rag-assistant",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "A multi-user agentic RAG assistant with tool calling, long-term memory and observable streaming workflows.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -n web,api,mcp -c blue,green,magenta \"npm:dev:web\" \"npm:dev:api\" \"npm:dev:mcp\"",
+    "dev:web": "vite",
+    "dev:api": "npm --prefix backend run dev",
+    "dev:mcp": "npm --prefix backend run mcp",
     "build": "vite build",
+    "test": "node --test tests/*.test.js",
+    "check": "npm run test && npm run build && npm --prefix backend run check && npm --prefix backend test",
     "preview": "vite preview"
   },
+  "engines": {
+    "node": ">=22.12.0 <25"
+  },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "dompurify": "^3.4.12",
     "element-plus": "^2.12.0",
     "highlight.js": "^11.11.1",
     "marked": "^17.0.5",
@@ -19,6 +30,9 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "unplugin-auto-import": "^21.0.0",
+    "unplugin-vue-components": "^32.1.0",
     "vite": "^7.2.4"
   }
 }

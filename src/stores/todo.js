@@ -1,15 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-
-const API = 'http://localhost:3001'
+import { apiUrl, authHeaders as createAuthHeaders } from '../utils/api'
 
 function authHeaders(extra = {}) {
-  try {
-    const token = JSON.parse(localStorage.getItem('auth-user'))?.token || ''
-    return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, ...extra }
-  } catch {
-    return { 'Content-Type': 'application/json', ...extra }
-  }
+  return createAuthHeaders({ 'Content-Type': 'application/json', ...extra })
 }
 
 export const useTodoStore = defineStore('todo', () => {
@@ -25,7 +19,7 @@ export const useTodoStore = defineStore('todo', () => {
   async function fetchTodos() {
     loading.value = true
     try {
-      const res = await fetch(`${API}/api/todos`, { headers: authHeaders() })
+      const res = await fetch(apiUrl('/api/todos'), { headers: authHeaders() })
       const data = await res.json()
       todos.value = data.todos || []
     } finally {
@@ -36,7 +30,7 @@ export const useTodoStore = defineStore('todo', () => {
   async function addTodo(text) {
     const trimmedText = text.trim()
     if (!trimmedText) return
-    const res = await fetch(`${API}/api/todos`, {
+    const res = await fetch(apiUrl('/api/todos'), {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ text: trimmedText })
@@ -46,14 +40,14 @@ export const useTodoStore = defineStore('todo', () => {
   }
 
   async function deleteTodo(id) {
-    const res = await fetch(`${API}/api/todos/${id}`, { method: 'DELETE', headers: authHeaders() })
+    const res = await fetch(apiUrl(`/api/todos/${id}`), { method: 'DELETE', headers: authHeaders() })
     const data = await res.json()
     todos.value = data.todos || []
     selectedTodoIds.value.delete(id)
   }
 
   async function toggleTodo(id) {
-    const res = await fetch(`${API}/api/todos/${id}/toggle`, { method: 'PATCH', headers: authHeaders() })
+    const res = await fetch(apiUrl(`/api/todos/${id}/toggle`), { method: 'PATCH', headers: authHeaders() })
     const data = await res.json()
     todos.value = data.todos || []
   }
@@ -62,7 +56,7 @@ export const useTodoStore = defineStore('todo', () => {
     const newState = !isAllCompleted.value
     const toToggle = todos.value.filter(t => t.completed !== newState)
     await Promise.all(toToggle.map(t =>
-      fetch(`${API}/api/todos/${t.id}/toggle`, { method: 'PATCH', headers: authHeaders() })
+      fetch(apiUrl(`/api/todos/${t.id}/toggle`), { method: 'PATCH', headers: authHeaders() })
     ))
     await fetchTodos()
   }
@@ -85,7 +79,7 @@ export const useTodoStore = defineStore('todo', () => {
 
   async function batchDeleteTodos() {
     await Promise.all([...selectedTodoIds.value].map(id =>
-      fetch(`${API}/api/todos/${id}`, { method: 'DELETE', headers: authHeaders() })
+      fetch(apiUrl(`/api/todos/${id}`), { method: 'DELETE', headers: authHeaders() })
     ))
     selectedTodoIds.value.clear()
     await fetchTodos()

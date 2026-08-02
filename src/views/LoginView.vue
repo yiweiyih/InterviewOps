@@ -3,6 +3,7 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
+import { apiUrl } from '../utils/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -15,8 +16,6 @@ const errorMsg = ref('')
 const loginForm = reactive({ username: '', password: '' })
 const registerForm = reactive({ username: '', password: '', confirm: '' })
 
-const API = 'http://localhost:3001'
-
 async function handleLogin() {
   if (!loginForm.username || !loginForm.password) {
     errorMsg.value = '请输入用户名和密码'
@@ -25,7 +24,7 @@ async function handleLogin() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const res = await fetch(`${API}/api/login`, {
+    const res = await fetch(apiUrl('/api/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: loginForm.username, password: loginForm.password })
@@ -54,7 +53,7 @@ async function handleRegister() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const res = await fetch(`${API}/api/register`, {
+    const res = await fetch(apiUrl('/api/register'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: registerForm.username, password: registerForm.password })

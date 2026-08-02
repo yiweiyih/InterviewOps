@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { apiUrl, authHeaders } from '../utils/api'
 
 const STORAGE_KEY = 'knowledge_files'
 const uploading = ref(false)
@@ -16,8 +17,9 @@ async function handleUpload(e) {
   try {
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch('http://localhost:3001/api/knowledge/upload', {
+    const res = await fetch(apiUrl('/api/knowledge/upload'), {
       method: 'POST',
+      headers: authHeaders(),
       body: form
     })
     const data = await res.json()

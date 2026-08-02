@@ -10,6 +10,7 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { useTodoStore } from '../stores/todo'
 import { streamChat } from '../utils/sseClient'
+import { apiUrl } from '../utils/api'
 
 const chatStore = useChatStore()
 const todoStore = useTodoStore()
@@ -109,7 +110,7 @@ const sendMessage = async () => {
 
   try {
     await streamChat(
-      'http://localhost:3001/api/chat',
+      apiUrl('/api/chat'),
       apiMessages,
       onChunk,
       abortController.signal,
@@ -169,7 +170,7 @@ const handleRegenerate = async (msgId) => {
 
   try {
     await streamChat(
-      'http://localhost:3001/api/chat',
+      apiUrl('/api/chat'),
       apiMessages,
       onChunk,
       abortController.signal,
