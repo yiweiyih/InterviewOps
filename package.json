@@ -12,6 +12,8 @@
     "build": "vite build",
     "test": "node --test tests/*.test.js",
     "check": "npm run test && npm run build && npm --prefix backend run check && npm --prefix backend test",
+    "eval:tools": "npm --prefix backend run eval:tools",
+    "eval:tools:dry": "npm --prefix backend run eval:tools:dry",
     "preview": "vite preview"
   },
   "engines": {

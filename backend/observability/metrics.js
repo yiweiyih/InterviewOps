@@ -4,6 +4,10 @@ const toolCounters = new Map();
 const toolDurations = new Map();
 const ragCounters = new Map();
 const ragDurations = new Map();
+const llmCounters = new Map();
+const llmDurations = new Map();
+let llmInputTokensTotal = 0;
+let llmOutputTokensTotal = 0;
 let ragResultsTotal = 0;
 
 function increment(map, key, amount = 1) {
@@ -45,6 +49,14 @@ function recordRag({ outcome, durationMs, resultCount }) {
   increment(ragCounters, outcome);
   ragResultsTotal += resultCount;
   observe(ragDurations, outcome, durationMs);
+}
+
+function recordLlm({ operation, status, durationMs, usage = {} }) {
+  const key = JSON.stringify([operation, status]);
+  increment(llmCounters, key);
+  observe(llmDurations, key, durationMs);
+  llmInputTokensTotal += usage.prompt_tokens || usage.input_tokens || 0;
+  llmOutputTokensTotal += usage.completion_tokens || usage.output_tokens || 0;
 }
 
 function escapeLabel(value) {
@@ -96,6 +108,24 @@ function renderPrometheus() {
   lines.push('# TYPE agentic_rag_results_total counter');
   lines.push(`agentic_rag_results_total ${ragResultsTotal}`);
 
+  lines.push('# HELP agentic_llm_calls_total Total LLM calls by operation and status.');
+  lines.push('# TYPE agentic_llm_calls_total counter');
+  for (const [key, count] of [...llmCounters.entries()].sort()) {
+    const [operation, status] = JSON.parse(key);
+    const metricLabels = labels({ operation, status });
+    const duration = llmDurations.get(key);
+    lines.push(`agentic_llm_calls_total${metricLabels} ${count}`);
+    lines.push(`agentic_llm_duration_ms_sum${metricLabels} ${duration.sum.toFixed(3)}`);
+    lines.push(`agentic_llm_duration_ms_count${metricLabels} ${duration.count}`);
+    lines.push(`agentic_llm_duration_ms_max${metricLabels} ${duration.max.toFixed(3)}`);
+  }
+  lines.push('# HELP agentic_llm_input_tokens_total Total LLM input tokens reported by the provider.');
+  lines.push('# TYPE agentic_llm_input_tokens_total counter');
+  lines.push(`agentic_llm_input_tokens_total ${llmInputTokensTotal}`);
+  lines.push('# HELP agentic_llm_output_tokens_total Total LLM output tokens reported by the provider.');
+  lines.push('# TYPE agentic_llm_output_tokens_total counter');
+  lines.push(`agentic_llm_output_tokens_total ${llmOutputTokensTotal}`);
+
   return `${lines.join('\n')}\n`;
 }
 
@@ -106,7 +136,11 @@ function resetMetrics() {
   toolDurations.clear();
   ragCounters.clear();
   ragDurations.clear();
+  llmCounters.clear();
+  llmDurations.clear();
   ragResultsTotal = 0;
+  llmInputTokensTotal = 0;
+  llmOutputTokensTotal = 0;
 }
 
 module.exports = {
@@ -114,6 +148,7 @@ module.exports = {
   recordHttp,
   recordTool,
   recordRag,
+  recordLlm,
   renderPrometheus,
   resetMetrics
 };

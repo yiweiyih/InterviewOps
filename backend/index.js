@@ -15,6 +15,7 @@ const {
   recordHttp,
   recordTool,
   recordRag,
+  recordLlm,
   renderPrometheus
 } = require('./observability/metrics');
 
@@ -91,6 +92,23 @@ function withTimeout(promise, timeoutMs, label) {
     timer = setTimeout(() => reject(new Error(`${label} 超过 ${timeoutMs}ms`)), timeoutMs);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function observeLlm(operation, request) {
+  const startedAt = performance.now();
+  try {
+    const response = await request();
+    recordLlm({
+      operation,
+      status: 'success',
+      durationMs: performance.now() - startedAt,
+      usage: response.usage || {}
+    });
+    return response;
+  } catch (error) {
+    recordLlm({ operation, status: 'error', durationMs: performance.now() - startedAt });
+    throw error;
+  }
 }
 
 // ── MCP Client ────────────────────────────────────────────
@@ -297,15 +315,9 @@ const PLAN_SYSTEM = `你是一个任务规划助手。判断用户的请求是�
 如果不是复杂任务（普通问答、单步操作），输出：{"tasks":null}
 复杂任务的判断标准：需要3个以上明显独立的步骤、步骤之间有数据依赖关系。`;
 
-function callDeepSeekJSON(messages) {
+function requestDeepSeekJson(payload, label) {
   return new Promise((resolve, reject) => {
-    const requestBody = JSON.stringify({
-      model: 'deepseek-chat',
-      messages,
-      max_tokens: 1000,
-      temperature: 0.3,
-      response_format: { type: 'json_object' }
-    });
+    const requestBody = JSON.stringify(payload);
     const url = new URL(API_BASE_URL);
     const options = {
       hostname: url.hostname,
@@ -323,14 +335,31 @@ function callDeepSeekJSON(messages) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('规划响应解析失败')); }
+        let json;
+        try { json = JSON.parse(data); }
+        catch { reject(new Error(`${label}返回了无效的 JSON`)); return; }
+        if (res.statusCode < 200 || res.statusCode >= 300 || json.error) {
+          reject(new Error(json.error?.message || `${label}请求失败（HTTP ${res.statusCode}）`));
+          return;
+        }
+        resolve(json);
       });
     });
     req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error(`${label}请求超时`)));
     req.write(requestBody);
     req.end();
   });
+}
+
+function callDeepSeekJSON(messages) {
+  return requestDeepSeekJson({
+    model: 'deepseek-chat',
+    messages,
+    max_tokens: 1000,
+    temperature: 0.3,
+    response_format: { type: 'json_object' }
+  }, 'DeepSeek JSON');
 }
 
 // 拓扑排序：按依赖顺序返回任务执行序列
@@ -355,10 +384,10 @@ function topoSort(tasks) {
 // 规划入口：返回任务列表或null（普通对话）
 async function planTasks(userMessage) {
   try {
-    const response = await callDeepSeekJSON([
+    const response = await observeLlm('planner', () => callDeepSeekJSON([
       { role: 'system', content: PLAN_SYSTEM },
       { role: 'user', content: userMessage }
-    ]);
+    ]));
     const content = response.choices?.[0]?.message?.content;
     const json = typeof content === 'string' ? JSON.parse(content) : content;
     return json?.tasks || null;
@@ -466,40 +495,14 @@ async function handleWithPlanning(messages, res, userId) {
 
 // 第一轮：带 tools 发给 DeepSeek，让模型决定是否调用工具
 function callDeepSeekWithTools(messages) {
-  return new Promise((resolve, reject) => {
-    const requestBody = JSON.stringify({
+  return requestDeepSeekJson({
       model: 'deepseek-chat',
       messages,
       tools: TOOLS_SCHEMA,
       tool_choice: 'auto',
       max_tokens: 4000,
       temperature: 0.7
-    });
-    const url = new URL(API_BASE_URL);
-    const options = {
-      hostname: url.hostname,
-      port: url.port || 443,
-      path: url.pathname,
-      method: 'POST',
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
-        'Content-Length': Buffer.byteLength(requestBody)
-      }
-    };
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('DeepSeek 响应解析失败')); }
-      });
-    });
-    req.on('error', reject);
-    req.write(requestBody);
-    req.end();
-  });
+    }, 'DeepSeek 工具决策');
 }
 
 // 完整的 Agent Loop：支持多工具串联，最多 5 轮
@@ -556,7 +559,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       console.log(`[Agent] 第 ${round + 1} 轮：发送给 DeepSeek`);
-      const response = await callDeepSeekWithTools(loopMessages);
+      const response = await observeLlm('agent_decision', () => callDeepSeekWithTools(loopMessages));
       const choice = response.choices?.[0];
 
       if (choice?.finish_reason !== 'tool_calls' || !choice?.message?.tool_calls?.length) {
@@ -568,7 +571,11 @@ async function handleWithFunctionCalling(messages, res, userId) {
         // 对话后：异步提取用户事实存入长期记忆（不阻塞流式输出）
         const assistantContent = choice?.message?.content || '';
         if (assistantContent && lastUserMsg) {
-          extractAndSaveMemories(lastUserMsg, assistantContent, callDeepSeekJSON, userId).catch(() => {});
+          const memoryLlm = memoryMessages => observeLlm(
+            'memory_extraction',
+            () => callDeepSeekJSON(memoryMessages)
+          );
+          extractAndSaveMemories(lastUserMsg, assistantContent, memoryLlm, userId).catch(() => {});
         }
         handleStreamRequest(loopMessages, res, sseStarted);
         return;
@@ -671,6 +678,10 @@ async function handleWithFunctionCalling(messages, res, userId) {
 
 // 处理流式请求
 function handleStreamRequest(messages, res, headersAlreadySet = false) {
+  const llmStartedAt = performance.now();
+  let completed = false;
+  let usage = {};
+
   const requestBody = {
     model: 'deepseek-chat',
     messages: messages,
@@ -702,8 +713,36 @@ function handleStreamRequest(messages, res, headersAlreadySet = false) {
     res.setHeader('X-Accel-Buffering', 'no');
   }
 
+  function recordStream(status) {
+    recordLlm({
+      operation: 'stream_response',
+      status,
+      durationMs: performance.now() - llmStartedAt,
+      usage
+    });
+  }
+
+  function finish(status, errorMessage) {
+    if (completed) return;
+    completed = true;
+    recordStream(status);
+    if (res.writableEnded || res.destroyed) return;
+    if (errorMessage) res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }
+
   const maasReq = https.request(options, (maasRes) => {
-    console.log('状态码:', maasRes.statusCode);
+    if (maasRes.statusCode < 200 || maasRes.statusCode >= 300) {
+      let errorBody = '';
+      maasRes.on('data', chunk => errorBody += chunk);
+      maasRes.on('end', () => {
+        let message = `模型服务请求失败（HTTP ${maasRes.statusCode}）`;
+        try { message = JSON.parse(errorBody).error?.message || message; } catch { /* ignore */ }
+        finish('error', message);
+      });
+      return;
+    }
 
     let buffer = '';
 
@@ -716,14 +755,14 @@ function handleStreamRequest(messages, res, headersAlreadySet = false) {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6).trim();
         if (data === '[DONE]') {
-          res.write('data: [DONE]\n\n');
-          res.end();
+          finish('success');
           return;
         }
         try {
           const json = JSON.parse(data);
+          if (json.usage) usage = json.usage;
           const content = json.choices?.[0]?.delta?.content || '';
-          if (content) {
+          if (content && !completed && !res.writableEnded) {
             res.write(`data: ${JSON.stringify({ content })}\n\n`);
           }
         } catch (e) {
@@ -733,23 +772,26 @@ function handleStreamRequest(messages, res, headersAlreadySet = false) {
     });
 
     maasRes.on('end', () => {
-      res.write('data: [DONE]\n\n');
-      res.end();
+      finish('success');
     });
+    maasRes.on('error', error => finish('error', `模型响应中断：${error.message}`));
   });
 
   maasReq.on('error', (error) => {
     console.error('请求错误:', error);
-    res.write(`data: ${JSON.stringify({ error: '流式请求失败：' + error.message })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
+    finish('error', '流式请求失败：' + error.message);
   });
 
   maasReq.on('timeout', () => {
+    finish('error', '模型请求超时');
     maasReq.destroy();
-    res.write(`data: ${JSON.stringify({ error: '请求超时' })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
+  });
+
+  res.once('close', () => {
+    if (completed) return;
+    completed = true;
+    recordStream('cancelled');
+    maasReq.destroy();
   });
 
   maasReq.write(JSON.stringify(requestBody));
