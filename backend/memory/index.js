@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const STORE_PATH = path.join(__dirname, 'memory-store.json');
 const SF_API_KEY = process.env.SILICONFLOW_API_KEY;
@@ -58,6 +58,7 @@ function cosineSimilarity(a, b) {
 
 // 写入一条记忆，同key的旧记忆会被覆盖
 async function saveMemory(key, value, userId) {
+  if (!userId) throw new Error('缺少用户身份，拒绝写入长期记忆');
   const store = loadStore().filter(m => !(m.key === key && m.userId === userId));
   const text = `${key}：${value}`;
   const vector = await getEmbedding(text);
@@ -67,7 +68,8 @@ async function saveMemory(key, value, userId) {
 
 // 按相关性检索记忆，返回Top-K
 async function retrieveMemory(query, topK = 5, userId) {
-  const store = loadStore().filter(m => !userId || m.userId === userId);
+  if (!userId) return [];
+  const store = loadStore().filter(m => m.userId === userId);
   if (!store.length) return [];
   const queryVector = await getEmbedding(query);
   return store

@@ -1,7 +1,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const STORE_PATH = path.join(__dirname, 'knowledge-store.json');
 const SF_API_KEY = process.env.SILICONFLOW_API_KEY;
@@ -9,14 +9,27 @@ const EMBED_MODEL = 'BAAI/bge-m3';
 
 function loadStore() {
   if (!fs.existsSync(STORE_PATH)) return [];
-  return JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
+  try {
+    return JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
+  } catch {
+    throw new Error('知识库索引损坏，请恢复或重建 knowledge-store.json');
+  }
 }
 
 function saveStore(chunks) {
-  fs.writeFileSync(STORE_PATH, JSON.stringify(chunks, null, 2));
+  const tempPath = `${STORE_PATH}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(chunks, null, 2));
+  fs.renameSync(tempPath, STORE_PATH);
 }
 
 function chunkText(text, chunkSize = 500, overlap = 50) {
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
+    throw new RangeError('chunkSize 必须是正整数');
+  }
+  if (!Number.isInteger(overlap) || overlap < 0 || overlap >= chunkSize) {
+    throw new RangeError('overlap 必须是小于 chunkSize 的非负整数');
+  }
+
   const chunks = [];
   let start = 0;
   while (start < text.length) {
@@ -57,31 +70,40 @@ function getEmbedding(input) {
 }
 
 function cosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || a.length !== b.length) {
+    throw new TypeError('向量必须是长度相同的非空数组');
+  }
+
   let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     normA += a[i] * a[i];
     normB += b[i] * b[i];
   }
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+  return denominator === 0 ? 0 : dot / denominator;
 }
 
-async function ingestFile(filePath, fileName) {
+async function ingestFile(filePath, fileName, userId) {
+  if (!userId) throw new Error('缺少用户身份，拒绝写入知识库');
+
   const raw = fs.readFileSync(filePath);
   const text = raw.toString('utf-8');
   const chunks = chunkText(text);
-  const store = loadStore().filter(c => c.source !== fileName);
+  const store = loadStore().filter(c => !(c.userId === userId && c.source === fileName));
+  const indexedAt = new Date().toISOString();
 
   for (let i = 0; i < chunks.length; i++) {
     const vector = await getEmbedding(chunks[i]);
-    store.push({ source: fileName, chunk: i, text: chunks[i], vector });
+    store.push({ userId, source: fileName, chunk: i, text: chunks[i], vector, indexedAt });
   }
   saveStore(store);
   return chunks.length;
 }
 
-async function retrieve(query, topK = 3) {
-  const store = loadStore();
+async function retrieve(query, topK = 3, userId) {
+  if (!userId) return [];
+  const store = loadStore().filter(item => item.userId === userId);
   if (!store.length) return [];
   const queryVector = await getEmbedding(query);
 
@@ -97,4 +119,4 @@ async function retrieve(query, topK = 3) {
     .filter(r => r.score > 0.3);
 }
 
-module.exports = { ingestFile, retrieve };
+module.exports = { ingestFile, retrieve, chunkText, cosineSimilarity };

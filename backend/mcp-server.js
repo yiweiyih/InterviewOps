@@ -3,7 +3,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
 const app = express();
 app.use(express.json());
@@ -310,7 +310,13 @@ app.post('/mcp', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', server: 'weather-mcp-server', tools: TOOLS.map(t => t.name) });
+  res.json({
+    status: 'ok',
+    service: 'agentic-rag-mcp',
+    version: '2.0.0',
+    tools: TOOLS.map(t => t.name),
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.listen(PORT, () => {

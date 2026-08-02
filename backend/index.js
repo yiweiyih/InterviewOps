@@ -4,14 +4,27 @@ const dotenv = require('dotenv');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { ingestFile, retrieve } = require('./rag/index');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret';
+function requiredEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`缺少必要环境变量 ${name}，请检查 backend/.env`);
+  return value;
+}
+
+const JWT_SECRET = requiredEnv('JWT_SECRET');
+if (JWT_SECRET.length < 32) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('生产环境的 JWT_SECRET 至少需要 32 个字符');
+  }
+  console.warn('[Security] 当前 JWT_SECRET 少于 32 个字符，仅允许用于本地开发');
+}
 const USERS_FILE = path.join(__dirname, 'users.json');
 
 function readUsers() {
@@ -24,15 +37,29 @@ function verifyToken(req) {
   const auth = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) return null;
-  try { return jwt.verify(token, JWT_SECRET); } catch { return null; }
+  try { return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }); } catch { return null; }
 }
 
-const upload = multer({ dest: path.join(__dirname, 'uploads') });
+const upload = multer({
+  dest: path.join(__dirname, 'uploads'),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, callback) => {
+    const allowedExtensions = new Set(['.md', '.markdown', '.txt', '.json']);
+    const extension = path.extname(file.originalname).toLowerCase();
+    callback(extension && allowedExtensions.has(extension) ? null : new Error('仅支持 md、markdown、txt、json 文件'), allowedExtensions.has(extension));
+  }
+});
 
-const API_KEY = process.env.DEEPSEEK_API_KEY;
-const PORT = process.env.PORT || 3000;
-const API_BASE_URL = process.env.DEEPSEEK_BASE_URL;
+const API_KEY = requiredEnv('DEEPSEEK_API_KEY');
+const PORT = Number(process.env.PORT || 3001);
+const API_BASE_URL = requiredEnv('DEEPSEEK_BASE_URL');
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:3002';
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const SERVICE_VERSION = '1.0.0';
+
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  throw new Error('PORT 必须是 1 到 65535 之间的整数');
+}
 
 // ── 工具函数 ──────────────────────────────────────────────
 function readBody(req) {
@@ -59,7 +86,7 @@ function callMcpTool(toolName, args) {
       params: { name: toolName, arguments: args },
       id: Date.now()
     });
-    const url = new URL(MCP_SERVER_URL + '/mcp');
+    const url = new URL('/mcp', MCP_SERVER_URL);
     const options = {
       hostname: url.hostname,
       port: url.port || 80,
@@ -90,10 +117,12 @@ function callMcpTool(toolName, args) {
 
 // 创建与简化版服务器完全相同的HTTP服务器
 const server = http.createServer((req, res) => {
+  const requestId = req.headers['x-request-id'] || crypto.randomUUID();
+  res.setHeader('X-Request-Id', requestId);
   // 设置CORS头
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE, PATCH');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-Id');
   
   // 处理OPTIONS请求
   if (req.method === 'OPTIONS') {
@@ -118,9 +147,6 @@ const server = http.createServer((req, res) => {
         const requestData = JSON.parse(body);
         const { messages } = requestData;
 
-        console.log('=== 收到请求 ===');
-        console.log('消息:', messages);
-
         await handleWithPlanning(messages, res, user.userId);
       } catch (error) {
         console.error('解析请求体错误:', error);
@@ -130,21 +156,25 @@ const server = http.createServer((req, res) => {
       }
     });
   } else if (req.method === 'GET' && req.url === '/health') {
-    // 健康检查端点
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ status: 'ok', message: 'AI Chat API is running' }));
+    sendJson(res, {
+      status: 'ok',
+      service: 'agentic-rag-api',
+      version: SERVICE_VERSION,
+      timestamp: new Date().toISOString()
+    });
   } else if (req.method === 'POST' && req.url === '/api/register') {
     readBody(req).then(async (body) => {
       const { username, password } = body;
       if (!username || !password) { sendJson(res, { error: '用户名和密码不能为空' }, 400); return; }
+      if (username.length < 3 || username.length > 32) { sendJson(res, { error: '用户名长度应为 3 到 32 个字符' }, 400); return; }
+      if (password.length < 8 || password.length > 128) { sendJson(res, { error: '密码长度应为 8 到 128 个字符' }, 400); return; }
       const users = readUsers();
       if (users.find(u => u.username === username)) { sendJson(res, { error: '用户名已存在' }, 400); return; }
       const hash = await bcrypt.hash(password, 10);
       const newUser = { id: `u-${Date.now()}`, username, password: hash };
       users.push(newUser);
       writeUsers(users);
-      const token = jwt.sign({ userId: newUser.id, username }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ userId: newUser.id, username }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '7d' });
       sendJson(res, { token, userId: newUser.id, username });
     });
   } else if (req.method === 'POST' && req.url === '/api/login') {
@@ -155,7 +185,7 @@ const server = http.createServer((req, res) => {
       if (!user || !(await bcrypt.compare(password, user.password))) {
         sendJson(res, { error: '用户名或密码错误' }, 401); return;
       }
-      const token = jwt.sign({ userId: user.id, username }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ userId: user.id, username }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '7d' });
       sendJson(res, { token, userId: user.id, username });
     });
   } else if (req.method === 'GET' && req.url === '/api/todos') {
@@ -188,15 +218,19 @@ const server = http.createServer((req, res) => {
       .then(data => sendJson(res, data))
       .catch(err => sendJson(res, { error: err.message }, 500));
   } else if (req.method === 'POST' && req.url === '/api/knowledge/upload') {
-    if (!verifyToken(req)) { sendJson(res, { error: '未登录' }, 401); return; }
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
     upload.single('file')(req, res, async (err) => {
       if (err) return sendJson(res, { error: err.message }, 400);
+      if (!req.file) return sendJson(res, { error: '请选择要上传的文件' }, 400);
       try {
         const fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf-8');
-        const count = await ingestFile(req.file.path, fileName);
+        const count = await ingestFile(req.file.path, fileName, user.userId);
         sendJson(res, { ok: true, chunks: count, name: fileName });
       } catch (e) {
         sendJson(res, { error: e.message }, 500);
+      } finally {
+        fs.unlink(req.file.path, () => {});
       }
     });
   } else {
@@ -623,7 +657,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
           writeToolCall(toolName, 'running', inputSummary, null);
           // retrieve_knowledge 直接走本地 RAG，不经过 MCP
           const result = toolName === 'retrieve_knowledge'
-            ? await retrieve(toolArgs.query)
+            ? await retrieve(toolArgs.query, 3, userId)
             : await callMcpTool(toolName, toolArgs);
           // 收集 RAG 引用
           if (toolName === 'retrieve_knowledge' && Array.isArray(result)) {

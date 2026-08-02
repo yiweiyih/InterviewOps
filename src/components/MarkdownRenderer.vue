@@ -1,14 +1,32 @@
 <script setup>
+import { computed } from 'vue'
 import { marked } from 'marked'
-import hljs from 'highlight.js'
+import DOMPurify from 'dompurify'
+import hljs from 'highlight.js/lib/core'
+import bash from 'highlight.js/lib/languages/bash'
+import css from 'highlight.js/lib/languages/css'
+import java from 'highlight.js/lib/languages/java'
+import javascript from 'highlight.js/lib/languages/javascript'
+import json from 'highlight.js/lib/languages/json'
+import markdown from 'highlight.js/lib/languages/markdown'
+import python from 'highlight.js/lib/languages/python'
+import sql from 'highlight.js/lib/languages/sql'
+import typescript from 'highlight.js/lib/languages/typescript'
+import xml from 'highlight.js/lib/languages/xml'
 import 'highlight.js/styles/github-dark.css'
 
-marked.setOptions({
-  highlight: (code, lang) => {
-    const language = hljs.getLanguage(lang) ? lang : 'plaintext'
-    return hljs.highlight(code, { language }).value
-  }
-})
+Object.entries({ bash, css, java, javascript, json, markdown, python, sql, typescript, xml })
+  .forEach(([name, language]) => hljs.registerLanguage(name, language))
+
+const renderer = new marked.Renderer()
+renderer.code = ({ text, lang }) => {
+  const language = lang && hljs.getLanguage(lang) ? lang : null
+  const highlighted = language
+    ? hljs.highlight(text, { language }).value
+    : hljs.highlightAuto(text).value
+  const languageClass = language ? ` language-${language}` : ''
+  return `<pre><code class="hljs${languageClass}">${highlighted}</code></pre>`
+}
 
 const props = defineProps({
   content: {
@@ -16,10 +34,14 @@ const props = defineProps({
     required: true
   }
 })
+
+const safeHtml = computed(() => DOMPurify.sanitize(
+  marked.parse(props.content, { renderer })
+))
 </script>
 
 <template>
-  <div class="markdown-body" v-html="marked(content)" />
+  <div class="markdown-body" v-html="safeHtml" />
 </template>
 
 <style scoped>
