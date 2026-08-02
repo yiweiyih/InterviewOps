@@ -8,8 +8,16 @@ const uploading = ref(false)
 const loading = ref(false)
 const uploadedFiles = ref([])
 const fileInput = ref(null)
+const category = ref('resume')
 
-const ACCEPT = '.md,.markdown,.txt,.json'
+const ACCEPT = '.docx,.pdf,.md,.markdown,.txt,.json'
+const categories = [
+  { value: 'resume', label: '个人简历' },
+  { value: 'jd', label: '目标 JD' },
+  { value: 'project', label: '项目资料' },
+  { value: 'transcript', label: '面试记录' },
+  { value: 'other', label: '其他笔记' }
+]
 const documentCount = computed(() => uploadedFiles.value.length)
 const chunkCount = computed(() => uploadedFiles.value.reduce((total, document) => total + (document.chunks || 0), 0))
 
@@ -37,6 +45,7 @@ async function handleUpload(e) {
   try {
     const form = new FormData()
     form.append('file', file)
+    form.append('category', category.value)
     const res = await fetch(apiUrl('/api/knowledge/upload'), {
       method: 'POST',
       headers: authHeaders(),
@@ -81,11 +90,11 @@ onMounted(loadDocuments)
   <div class="knowledge-page">
     <section class="knowledge-hero">
       <div class="hero-copy">
-        <div class="eyebrow">USER-SCOPED KNOWLEDGE</div>
-        <h1>构建用户级私有知识索引</h1>
-        <p>上传业务文档后自动完成分块和向量索引；Agent 只会检索当前用户的数据，并在回答中返回可核验的来源片段。</p>
+        <div class="eyebrow">EVIDENCE LIBRARY</div>
+        <h1>把简历、JD 和项目材料变成可追问的证据库</h1>
+        <p>支持直接上传 DOCX 与 PDF。模拟面试会从你的真实资料中生成问题，备战教练引用内容时会保留来源。</p>
         <div class="trust-row">
-          <span><el-icon><Lock /></el-icon> 用户数据隔离</span>
+          <span><el-icon><Lock /></el-icon> 私有用户隔离</span>
           <span><el-icon><Search /></el-icon> 来源可追溯</span>
           <span><el-icon><Collection /></el-icon> 索引可删除</span>
         </div>
@@ -100,31 +109,38 @@ onMounted(loadDocuments)
     <section class="workspace-grid">
       <div class="upload-card">
         <input ref="fileInput" type="file" :accept="ACCEPT" style="display:none" @change="handleUpload" />
+        <div class="category-picker">
+          <span>资料类型</span>
+          <el-segmented v-model="category" :options="categories.map(item => ({ label: item.label, value: item.value }))" />
+        </div>
         <button class="upload-zone" :disabled="uploading" @click="fileInput?.click()">
           <span class="upload-icon"><el-icon><DocumentAdd /></el-icon></span>
-          <strong>{{ uploading ? '正在切分并建立索引…' : '选择知识文件' }}</strong>
-          <small>支持 Markdown、TXT、JSON · 单文件上限由服务端统一控制</small>
+          <strong>{{ uploading ? '正在解析、切分并建立索引…' : '上传面试资料' }}</strong>
+          <small>支持 DOCX、PDF、Markdown、TXT、JSON · 单文件最大 5 MB</small>
           <em>{{ uploading ? '请稍候' : '浏览本地文件' }}</em>
         </button>
       </div>
 
       <div class="pipeline-card">
-        <div class="card-heading"><span>INDEX PIPELINE</span><h2>索引处理链路</h2></div>
+        <div class="card-heading"><span>EVIDENCE PIPELINE</span><h2>资料如何参与训练</h2></div>
         <ol>
-          <li><b>01</b><div><strong>结构化切分</strong><span>重叠窗口保留上下文语义</span></div></li>
-          <li><b>02</b><div><strong>向量索引</strong><span>写入来源、片段与用户归属</span></div></li>
-          <li><b>03</b><div><strong>隔离召回</strong><span>按 userId 过滤并返回相关度</span></div></li>
+          <li><b>01</b><div><strong>解析与分块</strong><span>从 DOCX / PDF 提取原始文字</span></div></li>
+          <li><b>02</b><div><strong>用户级索引</strong><span>写入资料类型、来源与用户归属</span></div></li>
+          <li><b>03</b><div><strong>针对性追问</strong><span>按岗位与训练模式召回证据</span></div></li>
         </ol>
       </div>
     </section>
 
     <section class="file-list">
       <div class="card-heading file-heading">
-        <div><span>DOCUMENTS</span><h2>已索引文档</h2></div>
+        <div><span>MATERIALS</span><h2>已索引面试资料</h2></div>
         <small>当前账户 · {{ documentCount }} 个文件</small>
       </div>
       <el-table v-loading="loading" :data="uploadedFiles" stripe>
         <el-table-column prop="name" label="文件名" min-width="220" />
+        <el-table-column label="资料类型" width="110">
+          <template #default="{ row }"><el-tag size="small" effect="plain">{{ categories.find(item => item.value === row.category)?.label || '其他笔记' }}</el-tag></template>
+        </el-table-column>
         <el-table-column prop="chunks" label="片段数" width="100" />
         <el-table-column prop="time" label="上传时间" width="180" />
         <el-table-column label="操作" width="100" align="right">
@@ -136,7 +152,7 @@ onMounted(loadDocuments)
           <div class="empty-state">
             <el-icon><Collection /></el-icon>
             <strong>还没有索引文档</strong>
-            <span>上传第一份资料后，可直接在 Agent 对话中提问</span>
+            <span>建议先上传简历与一个代表性项目，再开始模拟面试</span>
           </div>
         </template>
       </el-table>
@@ -147,7 +163,7 @@ onMounted(loadDocuments)
 
 <style scoped>
 .knowledge-page { min-width: 0; height: 100%; overflow-y: auto; padding: 28px; background: #f4f7fb; }
-.knowledge-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; padding: 30px 34px; color: #fff; border-radius: 18px; background: linear-gradient(135deg, #081d31, #123f67 65%, #1c6284); box-shadow: 0 16px 36px rgba(7,27,48,.15); }
+.knowledge-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; padding: 30px 34px; color: #fff; border-radius: 22px; background: linear-gradient(125deg, #20203e, #3b367d 68%, #286e70); box-shadow: 0 16px 36px rgba(34,31,76,.16); }
 .hero-copy { min-width: 0; }
 .eyebrow, .card-heading > span, .card-heading > div > span { color: #82a5be; font-size: 9px; letter-spacing: .15em; }
 .hero-copy h1 { margin: 10px 0; font-size: clamp(25px, 3vw, 36px); line-height: 1.2; }
@@ -161,6 +177,9 @@ onMounted(loadDocuments)
 .knowledge-stats i { width: 1px; height: 42px; background: rgba(255,255,255,.16); }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .75fr); gap: 18px; margin-top: 18px; }
 .upload-card, .pipeline-card, .file-list { padding: 22px; border: 1px solid #e4ebf2; border-radius: 14px; background: #fff; box-shadow: 0 6px 20px rgba(31,49,70,.04); }
+.category-picker { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.category-picker > span { flex: 0 0 auto; color: #596075; font-size: 11px; font-weight: 600; }
+.category-picker :deep(.el-segmented) { max-width: 100%; overflow-x: auto; }
 .upload-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; min-height: 210px; padding: 24px; border: 1px dashed #9bbce1; border-radius: 11px; color: inherit; background: linear-gradient(145deg, #f8fbff, #f3f7fc); cursor: pointer; transition: .2s ease; }
 .upload-zone:hover { border-color: #397fc8; background: #f3f8ff; }
 .upload-zone:disabled { cursor: wait; opacity: .7; }

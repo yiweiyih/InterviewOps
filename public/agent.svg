@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agentic RAG">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="InterviewOps">
   <defs>
     <linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22d3ee"/>
-      <stop offset="1" stop-color="#6366f1"/>
+      <stop stop-color="#34d5ae"/>
+      <stop offset="1" stop-color="#8b82ff"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="16" fill="#081c33"/>
+  <rect width="64" height="64" rx="16" fill="#1b1b35"/>
   <path d="M20 21h24v22H20z" fill="none" stroke="url(#g)" stroke-width="4" stroke-linejoin="round"/>
   <circle cx="25" cy="27" r="3" fill="#67e8f9"/>
   <circle cx="39" cy="27" r="3" fill="#818cf8"/>

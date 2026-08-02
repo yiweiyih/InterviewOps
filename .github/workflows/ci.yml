@@ -41,7 +41,7 @@ jobs:
         run: npm test --prefix backend
 
       - name: Validate evaluation dataset
-        run: npm run eval:tools:dry
+        run: npm run eval:tools:dry && npm run eval:interview
 
       - name: Build production frontend
         run: npm run build

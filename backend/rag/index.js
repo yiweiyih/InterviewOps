@@ -1,6 +1,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const { extractDocumentText } = require('../documents/extract-text');
 require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
@@ -30,6 +31,7 @@ function summarizeDocuments(store, userId) {
     if (item.userId !== userId) continue;
     const current = documents.get(item.source) || {
       name: item.source,
+      category: item.category || 'other',
       chunks: 0,
       indexedAt: item.indexedAt || null
     };
@@ -118,21 +120,24 @@ function cosineSimilarity(a, b) {
   return denominator === 0 ? 0 : dot / denominator;
 }
 
-async function ingestFile(filePath, fileName, userId) {
+async function ingestText(text, fileName, userId, options = {}) {
   if (!userId) throw new Error('缺少用户身份，拒绝写入知识库');
-
-  const raw = fs.readFileSync(filePath);
-  const text = raw.toString('utf-8');
   const chunks = chunkText(text);
   const store = loadStore().filter(c => !(c.userId === userId && c.source === fileName));
   const indexedAt = new Date().toISOString();
+  const category = String(options.category || 'other').trim().slice(0, 30) || 'other';
 
   for (let i = 0; i < chunks.length; i++) {
     const vector = await getEmbedding(chunks[i]);
-    store.push({ userId, source: fileName, chunk: i, text: chunks[i], vector, indexedAt });
+    store.push({ userId, source: fileName, category, chunk: i, text: chunks[i], vector, indexedAt });
   }
   saveStore(store);
   return chunks.length;
+}
+
+async function ingestFile(filePath, fileName, userId, options = {}) {
+  const text = await extractDocumentText(filePath, fileName);
+  return ingestText(text, fileName, userId, options);
 }
 
 async function retrieve(query, topK = 3, userId) {
@@ -144,6 +149,7 @@ async function retrieve(query, topK = 3, userId) {
   return store
     .map(item => ({
       source: item.source,
+      category: item.category || 'other',
       chunk: item.chunk,
       text: item.text,
       score: Math.round(cosineSimilarity(queryVector, item.vector) * 1000) / 1000
@@ -155,6 +161,7 @@ async function retrieve(query, topK = 3, userId) {
 
 module.exports = {
   ingestFile,
+  ingestText,
   retrieve,
   listDocuments,
   deleteDocument,

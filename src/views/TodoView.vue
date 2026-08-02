@@ -28,7 +28,7 @@ async function addTodo() {
   try {
     await todoStore.addTodo(text)
     newTodoText.value = ''
-    ElMessage.success('任务已添加，可继续交给 Agent 管理')
+    ElMessage.success('提升动作已加入计划')
   } catch (error) {
     ElMessage.error(error.message || '添加任务失败')
   } finally {
@@ -49,9 +49,9 @@ async function runAction(action, failureMessage) {
   <div class="task-page">
     <section class="task-hero">
       <div>
-        <span class="eyebrow">AGENT-AWARE TASKS</span>
-        <h1>把目标沉淀为可执行任务</h1>
-        <p>你可以手动维护任务，也可以在 Agent 对话中用自然语言完成新增、查询、完成和删除；两端共享同一份用户级数据。</p>
+        <span class="eyebrow">IMPROVEMENT BACKLOG</span>
+        <h1>把复盘结论变成可验收的提升动作</h1>
+        <p>记录要补充的项目指标、要重答的问题和要复习的知识点；备战教练也可以根据复盘结果自动写入计划。</p>
       </div>
       <div class="task-metrics">
         <div><el-icon><Clock /></el-icon><strong>{{ todoStore.remainingCount }}</strong><span>进行中</span></div>
@@ -64,21 +64,21 @@ async function runAction(action, failureMessage) {
 
     <section class="create-panel">
       <div class="panel-heading">
-        <div><span>QUICK CREATE</span><h2>新增任务</h2></div>
-        <small>也可以对 Agent 说：“帮我添加一条待办”</small>
+        <div><span>QUICK CREATE</span><h2>新增提升动作</h2></div>
+        <small>也可以对备战教练说：“把这个薄弱点加入计划”</small>
       </div>
       <div class="add-row">
         <el-input v-model="newTodoText" size="large" maxlength="120" show-word-limit
-          placeholder="输入下一步需要完成的具体事项…" @keyup.enter="addTodo" />
+          placeholder="例如：用 STAR 结构重写实习中最有挑战的一次协作…" @keyup.enter="addTodo" />
         <el-button type="primary" size="large" :icon="Plus" :loading="adding" :disabled="!newTodoText.trim()" @click="addTodo">
-          添加任务
+          加入计划
         </el-button>
       </div>
     </section>
 
     <section class="list-panel">
       <div class="panel-heading list-heading">
-        <div><span>EXECUTION QUEUE</span><h2>任务队列</h2></div>
+        <div><span>IMPROVEMENT QUEUE</span><h2>提升队列</h2></div>
         <div v-if="todoStore.todos.length" class="batch-actions">
           <el-checkbox :model-value="todoStore.isAllSelected" @change="todoStore.toggleAllSelection">全选</el-checkbox>
           <el-button type="danger" text :icon="Delete" :disabled="!todoStore.hasSelectedTodos"
@@ -91,8 +91,8 @@ async function runAction(action, failureMessage) {
       <div v-loading="todoStore.loading" class="task-list">
         <div v-if="!todoStore.todos.length && !todoStore.loading" class="empty-state">
           <span class="empty-icon"><el-icon><CircleCheck /></el-icon></span>
-          <strong>任务队列为空</strong>
-          <p>添加一条具体任务，或让 Agent 根据目标自动拆解。</p>
+          <strong>提升队列为空</strong>
+          <p>从一次复盘中选出最值得改进的一件事。</p>
         </div>
         <TodoItem v-for="todo in todoStore.todos" v-else :key="todo.id" :todo="todo"
           :is-selected="todoStore.selectedTodoIds.has(todo.id)"
@@ -112,7 +112,7 @@ async function runAction(action, failureMessage) {
 
 <style scoped>
 .task-page { min-width: 0; height: 100%; overflow-y: auto; padding: 28px; background: #f4f7fb; }
-.task-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; padding: 30px 34px; color: #fff; border-radius: 18px; background: linear-gradient(135deg, #081d31, #123f67 65%, #1c6284); box-shadow: 0 16px 36px rgba(7,27,48,.15); }
+.task-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; padding: 30px 34px; color: #fff; border-radius: 22px; background: linear-gradient(125deg, #20203e, #3b367d 68%, #286e70); box-shadow: 0 16px 36px rgba(34,31,76,.16); }
 .task-hero > div:first-child { min-width: 0; }
 .eyebrow, .panel-heading span { color: #82a5be; font-size: 9px; letter-spacing: .15em; }
 .task-hero h1 { margin: 10px 0; font-size: clamp(25px, 3vw, 36px); line-height: 1.2; }

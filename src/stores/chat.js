@@ -28,7 +28,7 @@ export const useChatStore = defineStore('chat', () => {
       messages: [{
         id: Date.now(),
         role: 'assistant',
-        content: '你好，我是 Agentic RAG Assistant。你可以交给我需要检索知识、调用工具或拆解执行的任务。',
+        content: '你好，我是 InterviewOps 备战教练。我可以结合你的简历、JD 和项目资料做表达诊断、项目追问、公司调研，并把改进项写入提升计划。',
         timestamp: new Date().toLocaleString()
       }]
     }

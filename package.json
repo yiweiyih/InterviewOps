@@ -2,7 +2,7 @@
   "name": "agentic-rag-assistant",
   "private": true,
   "version": "1.0.0",
-  "description": "A multi-user agentic RAG assistant with tool calling, long-term memory and observable streaming workflows.",
+  "description": "An evidence-grounded interview preparation and review agent with dynamic follow-ups and user-scoped RAG.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n web,api,mcp -c blue,green,magenta \"npm:dev:web\" \"npm:dev:api\" \"npm:dev:mcp\"",
@@ -14,6 +14,7 @@
     "check": "npm run test && npm run build && npm --prefix backend run check && npm --prefix backend test",
     "eval:tools": "npm --prefix backend run eval:tools",
     "eval:tools:dry": "npm --prefix backend run eval:tools:dry",
+    "eval:interview": "npm --prefix backend run eval:interview",
     "preview": "vite preview"
   },
   "engines": {

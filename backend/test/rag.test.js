@@ -24,6 +24,6 @@ test('summarizeDocuments isolates users and groups chunks by source', () => {
   ];
 
   assert.deepEqual(summarizeDocuments(store, 'u-1'), [
-    { name: 'resume.md', chunks: 2, indexedAt: '2026-08-01T00:00:00.000Z' }
+    { name: 'resume.md', category: 'other', chunks: 2, indexedAt: '2026-08-01T00:00:00.000Z' }
   ]);
 });
