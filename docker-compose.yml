@@ -1,0 +1,62 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      MCP_SERVER_URL: http://mcp:3002
+      CORS_ORIGIN: http://localhost:8080
+      DATA_DIR: /data
+    ports:
+      - "3001:3001"
+    volumes:
+      - agent-data:/data
+    depends_on:
+      mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["node", "mcp-server.js"]
+    env_file:
+      - backend/.env
+    environment:
+      NODE_ENV: production
+      MCP_PORT: 3002
+      DATA_DIR: /data
+    volumes:
+      - agent-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  agent-data:
