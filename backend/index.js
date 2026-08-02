@@ -10,6 +10,13 @@ const bcrypt = require('bcryptjs');
 const { ingestFile, retrieve, listDocuments, deleteDocument } = require('./rag/index');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
 const { getLlmTools, validateToolArguments } = require('./tools/catalog');
+const {
+  normalizeRoute,
+  recordHttp,
+  recordTool,
+  recordRag,
+  renderPrometheus
+} = require('./observability/metrics');
 
 dotenv.config({ quiet: true });
 
@@ -129,8 +136,17 @@ function callMcpTool(toolName, args, timeoutMs = 12000) {
 
 // 创建与简化版服务器完全相同的HTTP服务器
 const server = http.createServer((req, res) => {
+  const requestStartedAt = performance.now();
   const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   res.setHeader('X-Request-Id', requestId);
+  res.once('finish', () => {
+    recordHttp({
+      method: req.method,
+      route: normalizeRoute(req.method, req.url),
+      status: res.statusCode,
+      durationMs: performance.now() - requestStartedAt
+    });
+  });
   // 设置CORS头
   res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE, PATCH');
@@ -174,6 +190,10 @@ const server = http.createServer((req, res) => {
       version: SERVICE_VERSION,
       timestamp: new Date().toISOString()
     });
+  } else if (req.method === 'GET' && req.url === '/metrics') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.end(renderPrometheus());
   } else if (req.method === 'POST' && req.url === '/api/register') {
     readBody(req).then(async (body) => {
       const { username, password } = body;
@@ -560,41 +580,61 @@ async function handleWithFunctionCalling(messages, res, userId) {
 
       const settledResults = await Promise.allSettled(
         toolCalls.map(async (toolCall) => {
+          const toolStartedAt = performance.now();
           const toolName = toolCall.function.name;
-          const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
-          const definition = validateToolArguments(toolName, toolArgs);
-          const inputSummary = getToolInputSummary(toolCall);
-          if (definition.scope === 'user') {
-            if (!userId) throw new Error(`工具 ${toolName} 需要登录用户`);
-            toolArgs.userId = userId;
-          }
-          writeToolCall(toolName, 'running', inputSummary, null);
-          const result = definition.transport === 'local'
-            ? await withTimeout(retrieve(toolArgs.query, 3, userId), definition.timeoutMs, `工具 ${toolName}`)
-            : await callMcpTool(toolName, toolArgs, definition.timeoutMs);
-          // 收集 RAG 引用
-          if (toolName === 'retrieve_knowledge' && Array.isArray(result)) {
-            citations.push(...result);
-          }
-          function buildResultSummary(name, result) {
-            if (!result || typeof result !== 'object') return String(result || '').slice(0, 60);
-            if (name === 'get_weather') {
-              return `${result.temp_c}°C · ${result.description} · 湿度${result.humidity}%`;
+          try {
+            const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+            const definition = validateToolArguments(toolName, toolArgs);
+            const inputSummary = getToolInputSummary(toolCall);
+            if (definition.scope === 'user') {
+              if (!userId) throw new Error(`工具 ${toolName} 需要登录用户`);
+              toolArgs.userId = userId;
             }
-            if (name === 'get_datetime') return result.datetime || result.date || JSON.stringify(result).slice(0, 60);
-            if (name === 'add_todo') return `已添加：${result.todo?.text || ''}`;
-            if (name === 'delete_todo') return '已删除';
-            if (name === 'toggle_todo') return `已${result.todo?.completed ? '完成' : '取消完成'}`;
-            if (name === 'get_todos') return `共 ${result.todos?.length ?? 0} 条待办`;
-            if (name === 'search_web') return result.summary || result.results?.[0]?.title || '搜索完成';
-            if (name === 'write_note') return `已保存笔记：${result.title || ''}`;
-            if (name === 'read_notes') return `共 ${result.notes?.length ?? 0} 条笔记`;
-            return JSON.stringify(result).slice(0, 60);
+            writeToolCall(toolName, 'running', inputSummary, null);
+
+            let result;
+            if (definition.transport === 'local') {
+              const ragStartedAt = performance.now();
+              try {
+                result = await withTimeout(retrieve(toolArgs.query, 3, userId), definition.timeoutMs, `工具 ${toolName}`);
+                recordRag({
+                  outcome: result.length > 0 ? 'hit' : 'miss',
+                  durationMs: performance.now() - ragStartedAt,
+                  resultCount: result.length
+                });
+              } catch (error) {
+                recordRag({ outcome: 'error', durationMs: performance.now() - ragStartedAt, resultCount: 0 });
+                throw error;
+              }
+            } else {
+              result = await callMcpTool(toolName, toolArgs, definition.timeoutMs);
+            }
+
+            if (toolName === 'retrieve_knowledge' && Array.isArray(result)) citations.push(...result);
+
+            function buildResultSummary(name, toolResult) {
+              if (!toolResult || typeof toolResult !== 'object') return String(toolResult || '').slice(0, 60);
+              if (name === 'get_weather') return `${toolResult.temp_c}°C · ${toolResult.description} · 湿度${toolResult.humidity}%`;
+              if (name === 'get_datetime') return toolResult.datetime || toolResult.date || JSON.stringify(toolResult).slice(0, 60);
+              if (name === 'add_todo') return `已添加：${toolResult.todo?.text || ''}`;
+              if (name === 'delete_todo') return '已删除';
+              if (name === 'toggle_todo') return `已${toolResult.todo?.completed ? '完成' : '取消完成'}`;
+              if (name === 'get_todos') return `共 ${toolResult.todos?.length ?? 0} 条待办`;
+              if (name === 'search_web') return toolResult.summary || toolResult.results?.[0]?.title || '搜索完成';
+              if (name === 'write_note') return `已保存笔记：${toolResult.title || ''}`;
+              if (name === 'read_notes') return `共 ${toolResult.notes?.length ?? 0} 条笔记`;
+              return JSON.stringify(toolResult).slice(0, 60);
+            }
+
+            const resultSummary = buildResultSummary(toolName, result);
+            writeToolCall(toolName, 'done', inputSummary, resultSummary);
+            recordTool({ tool: toolName, status: 'success', durationMs: performance.now() - toolStartedAt });
+            console.log(`[Agent] 工具 ${toolName} 执行成功`);
+            return { tool_call_id: toolCall.id, content: JSON.stringify(result) };
+          } catch (error) {
+            recordTool({ tool: toolName, status: 'error', durationMs: performance.now() - toolStartedAt });
+            throw error;
           }
-          const resultSummary = buildResultSummary(toolName, result);
-          writeToolCall(toolName, 'done', inputSummary, resultSummary);
-          console.log(`[Agent] 工具 ${toolName} 执行成功`);
-          return { tool_call_id: toolCall.id, content: JSON.stringify(result) };
         })
       );
 
