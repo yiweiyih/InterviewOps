@@ -3,7 +3,9 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
-const STORE_PATH = path.join(__dirname, 'knowledge-store.json');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const STORE_PATH = path.join(DATA_DIR, 'knowledge-store.json');
 const SF_API_KEY = process.env.SILICONFLOW_API_KEY;
 const EMBED_MODEL = 'BAAI/bge-m3';
 

@@ -22,6 +22,9 @@ const {
 
 dotenv.config({ quiet: true });
 
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
 function requiredEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`缺少必要环境变量 ${name}，请检查 backend/.env`);
@@ -35,7 +38,7 @@ if (JWT_SECRET.length < 32) {
   }
   console.warn('[Security] 当前 JWT_SECRET 少于 32 个字符，仅允许用于本地开发');
 }
-const USERS_FILE = path.join(__dirname, 'users.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 function readUsers() {
   try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8')); } catch { return []; }
@@ -51,7 +54,7 @@ function verifyToken(req) {
 }
 
 const upload = multer({
-  dest: path.join(__dirname, 'uploads'),
+  dest: path.join(DATA_DIR, 'uploads'),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, callback) => {
     const allowedExtensions = new Set(['.md', '.markdown', '.txt', '.json']);

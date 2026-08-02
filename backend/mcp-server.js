@@ -9,16 +9,19 @@ require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 const app = express();
 app.use(express.json());
 
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
 // ── Todo 数据文件 ──────────────────────────────────────────
-const TODOS_FILE = path.join(__dirname, 'todos.json');
+const TODOS_FILE = path.join(DATA_DIR, 'todos.json');
 
 function readTodos(userId) {
-  const file = userId ? path.join(__dirname, `todos-${userId}.json`) : TODOS_FILE;
+  const file = userId ? path.join(DATA_DIR, `todos-${userId}.json`) : TODOS_FILE;
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
 }
 
 function writeTodos(userId, todos) {
-  const file = userId ? path.join(__dirname, `todos-${userId}.json`) : TODOS_FILE;
+  const file = userId ? path.join(DATA_DIR, `todos-${userId}.json`) : TODOS_FILE;
   fs.writeFileSync(file, JSON.stringify(todos, null, 2));
 }
 
@@ -26,15 +29,15 @@ const PORT = Number(process.env.MCP_PORT || 3002);
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 // ── Notes 数据文件 ─────────────────────────────────────────
-const NOTES_FILE = path.join(__dirname, 'notes.json');
+const NOTES_FILE = path.join(DATA_DIR, 'notes.json');
 
 function readNotes(userId) {
-  const file = userId ? path.join(__dirname, `notes-${userId}.json`) : NOTES_FILE;
+  const file = userId ? path.join(DATA_DIR, `notes-${userId}.json`) : NOTES_FILE;
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
 }
 
 function writeNotes(userId, notes) {
-  const file = userId ? path.join(__dirname, `notes-${userId}.json`) : NOTES_FILE;
+  const file = userId ? path.join(DATA_DIR, `notes-${userId}.json`) : NOTES_FILE;
   fs.writeFileSync(file, JSON.stringify(notes, null, 2));
 }
 

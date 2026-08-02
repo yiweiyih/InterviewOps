@@ -1,16 +1,46 @@
 {
-  "version": 1,
+  "version": 2,
   "threshold": 0.8,
   "cases": [
     {
-      "id": "weather",
+      "id": "weather_umbrella",
       "prompt": "北京今天需要带伞吗？",
       "expectedTools": ["get_weather"]
     },
     {
-      "id": "datetime",
+      "id": "weather_clothing",
+      "prompt": "上海现在穿薄外套会不会冷？",
+      "expectedTools": ["get_weather"]
+    },
+    {
+      "id": "weather_travel",
+      "prompt": "成都今天适合户外跑步吗？",
+      "expectedTools": ["get_weather"]
+    },
+    {
+      "id": "datetime_weekday",
       "prompt": "现在是星期几？",
       "expectedTools": ["get_datetime"]
+    },
+    {
+      "id": "datetime_date",
+      "prompt": "告诉我今天的完整日期和当前时间。",
+      "expectedTools": ["get_datetime"]
+    },
+    {
+      "id": "search_latest_news",
+      "prompt": "搜索一下今天人工智能领域的重要新闻。",
+      "expectedTools": ["search_web"]
+    },
+    {
+      "id": "search_current_person",
+      "prompt": "查一下 OpenAI 现任 CEO 是谁，并给出网页来源。",
+      "expectedTools": ["search_web"]
+    },
+    {
+      "id": "search_recent_release",
+      "prompt": "帮我找 Vue 最近一个稳定版本的发布说明。",
+      "expectedTools": ["search_web"]
     },
     {
       "id": "add_todo",
@@ -23,23 +53,73 @@
       "expectedTools": ["get_todos"]
     },
     {
+      "id": "delete_todo",
+      "prompt": "删除编号为 3 的待办。",
+      "expectedTools": ["delete_todo"]
+    },
+    {
+      "id": "toggle_todo",
+      "prompt": "把编号为 2 的任务标记为完成。",
+      "expectedTools": ["toggle_todo"]
+    },
+    {
       "id": "write_note",
-      "prompt": "记住：我的目标岗位是后端研发。",
+      "prompt": "保存一条笔记：标题是求职目标，内容是后端研发工程师。",
       "expectedTools": ["write_note"]
     },
     {
       "id": "read_notes",
-      "prompt": "我之前让你记住过哪些事情？",
+      "prompt": "读取我保存过的全部笔记。",
       "expectedTools": ["read_notes"]
     },
     {
-      "id": "rag",
+      "id": "rag_summary",
       "prompt": "根据我上传的项目文档，总结 Agent 的执行流程并给出引用。",
       "expectedTools": ["retrieve_knowledge"]
     },
     {
-      "id": "general_chat",
+      "id": "rag_fact_lookup",
+      "prompt": "我上传的需求文档里约定的接口超时时间是多少？",
+      "expectedTools": ["retrieve_knowledge"]
+    },
+    {
+      "id": "rag_compare",
+      "prompt": "对比我知识库中两份方案的优缺点，并注明信息来源。",
+      "expectedTools": ["retrieve_knowledge"]
+    },
+    {
+      "id": "multi_weather_todo",
+      "prompt": "查一下杭州天气，然后帮我添加一条适合今天的出行待办。",
+      "expectedTools": ["get_weather", "add_todo"]
+    },
+    {
+      "id": "multi_time_todo",
+      "prompt": "告诉我现在的时间，并添加一条今晚九点复盘项目的待办。",
+      "expectedTools": ["get_datetime", "add_todo"]
+    },
+    {
+      "id": "general_event_loop",
       "prompt": "用一句话解释什么是事件循环。",
+      "expectedTools": []
+    },
+    {
+      "id": "general_code_review",
+      "prompt": "解释代码评审为什么重要，不需要搜索资料。",
+      "expectedTools": []
+    },
+    {
+      "id": "general_writing",
+      "prompt": "把“这个系统很好用”改写得更专业。",
+      "expectedTools": []
+    },
+    {
+      "id": "general_math",
+      "prompt": "计算 17 乘以 23。",
+      "expectedTools": []
+    },
+    {
+      "id": "general_concept",
+      "prompt": "RAG 和模型微调的核心区别是什么？",
       "expectedTools": []
     }
   ]
