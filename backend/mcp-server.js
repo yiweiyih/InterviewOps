@@ -3,6 +3,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 const app = express();
 app.use(express.json());
 
@@ -19,8 +21,8 @@ function writeTodos(userId, todos) {
   fs.writeFileSync(file, JSON.stringify(todos, null, 2));
 }
 
-const PORT = 3002;
-const SERPER_API_KEY = '8433201c58f0a95c2f4ce491d0081b8c3e00f5fa';
+const PORT = Number(process.env.MCP_PORT || 3002);
+const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 // ── Notes 数据文件 ─────────────────────────────────────────
 const NOTES_FILE = path.join(__dirname, 'notes.json');
@@ -130,6 +132,11 @@ const TOOLS = [
 // ── 网络搜索 ──────────────────────────────────────────────
 function searchWeb(query) {
   return new Promise((resolve, reject) => {
+    if (!SERPER_API_KEY) {
+      reject(new Error('SERPER_API_KEY 未配置，网络搜索工具不可用'));
+      return;
+    }
+
     const body = JSON.stringify({ q: query, num: 5 });
     const options = {
       hostname: 'google.serper.dev',

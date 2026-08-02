@@ -32,7 +32,7 @@ dist-ssr
 backend/uploads/
 backend/users.json
 backend/todos*.json
-backend/notes.json
+backend/notes*.json
 backend/memory/memory-store.json
 backend/rag/knowledge-store.json
 backend/rag/vector-index/
