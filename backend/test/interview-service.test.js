@@ -60,3 +60,27 @@ test('interview service completes a scored session without sharing user data', a
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('interview service can end an active session before the first answer', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
+  try {
+    const service = createInterviewService({
+      dataDir: tempDir,
+      callJson: async () => ({
+        text: '请介绍你负责的项目。',
+        competency: '项目经验',
+        expectedSignals: ['背景', '贡献', '结果']
+      }),
+      retrieveKnowledge: async () => []
+    });
+
+    const session = await service.startSession('user-a', { mode: 'project' });
+    const completed = service.completeSession('user-a', session.id);
+
+    assert.equal(completed.status, 'completed');
+    assert.equal(completed.report.answeredQuestions, 0);
+    assert.equal(completed.report.overallScore, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
