@@ -20,6 +20,8 @@ const categories = [
 ]
 const documentCount = computed(() => uploadedFiles.value.length)
 const chunkCount = computed(() => uploadedFiles.value.reduce((total, document) => total + (document.chunks || 0), 0))
+const activeCategory = computed(() => categories.find(item => item.value === category.value) || categories[0])
+const visibleFiles = computed(() => uploadedFiles.value.filter(document => (document.category || 'other') === category.value))
 
 async function loadDocuments() {
   loading.value = true
@@ -115,7 +117,7 @@ onMounted(loadDocuments)
         </div>
         <button class="upload-zone" :disabled="uploading" @click="fileInput?.click()">
           <span class="upload-icon"><el-icon><DocumentAdd /></el-icon></span>
-          <strong>{{ uploading ? '正在解析、切分并建立索引…' : '上传面试资料' }}</strong>
+          <strong>{{ uploading ? '正在解析、切分并建立索引…' : `上传${activeCategory.label}` }}</strong>
           <small>支持 DOCX、PDF、Markdown、TXT、JSON · 单文件最大 5 MB</small>
           <em>{{ uploading ? '请稍候' : '浏览本地文件' }}</em>
         </button>
@@ -134,9 +136,9 @@ onMounted(loadDocuments)
     <section class="file-list">
       <div class="card-heading file-heading">
         <div><span>MATERIALS</span><h2>已索引面试资料</h2></div>
-        <small>当前账户 · {{ documentCount }} 个文件</small>
+        <small>{{ activeCategory.label }} · {{ visibleFiles.length }} 个文件</small>
       </div>
-      <el-table v-loading="loading" :data="uploadedFiles" stripe>
+      <el-table v-loading="loading" :data="visibleFiles" stripe>
         <el-table-column prop="name" label="文件名" min-width="220" />
         <el-table-column label="资料类型" width="110">
           <template #default="{ row }"><el-tag size="small" effect="plain">{{ categories.find(item => item.value === row.category)?.label || '其他笔记' }}</el-tag></template>
@@ -151,8 +153,8 @@ onMounted(loadDocuments)
         <template #empty>
           <div class="empty-state">
             <el-icon><Collection /></el-icon>
-            <strong>还没有索引文档</strong>
-            <span>建议先上传简历与一个代表性项目，再开始模拟面试</span>
+            <strong>还没有{{ activeCategory.label }}</strong>
+            <span>选择上方上传区添加资料，建立索引后会显示在这里</span>
           </div>
         </template>
       </el-table>
