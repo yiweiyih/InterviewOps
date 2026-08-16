@@ -4,14 +4,14 @@ const path = require('path');
 
 const DEFAULT_WORKSPACE = Object.freeze({
   profile: {
-    targetRole: '前端开发工程师',
+    targetRole: '',
     seniority: '校招 / 初级',
-    focusAreas: ['项目深挖', '前端基础', 'Agent / RAG'],
+    focusAreas: [],
     introduction: ''
   },
   target: {
     company: '',
-    jobTitle: '前端开发工程师',
+    jobTitle: '',
     jobDescription: '',
     interviewDate: ''
   }
@@ -26,8 +26,18 @@ function cleanText(value, maxLength) {
 }
 
 function normalizeWorkspace(input = {}, previous = DEFAULT_WORKSPACE) {
-  const profile = input.profile || {};
-  const target = input.target || {};
+  const inputProfile = input.profile || {};
+  const inputTarget = input.target || {};
+  const isImplicitLegacyDefault = !input.updatedAt
+    && inputProfile.targetRole === '前端开发工程师'
+    && inputTarget.jobTitle === '前端开发工程师'
+    && JSON.stringify(inputProfile.focusAreas) === JSON.stringify(['项目深挖', '前端基础', 'Agent / RAG']);
+  const profile = isImplicitLegacyDefault
+    ? { ...inputProfile, targetRole: '', focusAreas: [] }
+    : inputProfile;
+  const target = isImplicitLegacyDefault
+    ? { ...inputTarget, jobTitle: '' }
+    : inputTarget;
   const previousProfile = previous.profile || DEFAULT_WORKSPACE.profile;
   const previousTarget = previous.target || DEFAULT_WORKSPACE.target;
   const focusAreas = Array.isArray(profile.focusAreas)

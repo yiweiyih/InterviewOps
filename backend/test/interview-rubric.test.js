@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildReport, normalizeFeedback, normalizeQuestion } = require('../interview/rubric');
+const { INTERVIEW_MODES, buildReport, getMode, normalizeFeedback, normalizeQuestion } = require('../interview/rubric');
+
+test('setup modes are role-agnostic while legacy modes remain readable', () => {
+  assert.equal(getMode('role').label, '岗位专项');
+  assert.equal(getMode('missing').label, '综合模拟');
+  assert.equal(INTERVIEW_MODES.frontend.hidden, true);
+  assert.equal(INTERVIEW_MODES.agent.hidden, true);
+});
 
 test('question normalization accepts model aliases and trims noisy fields', () => {
   assert.deepEqual(normalizeQuestion({

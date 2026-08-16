@@ -21,10 +21,6 @@ const server = http.createServer((req, res) => {
         const requestData = JSON.parse(body);
         const { messages, stream } = requestData;
         
-        console.log('=== 收到请求 ===');
-        console.log('消息:', messages);
-        console.log('流式请求:', stream);
-        
         if (stream) {
           // 处理流式请求
           handleStreamRequest(messages, res);
@@ -73,14 +69,9 @@ function handleStreamRequest(messages, res) {
     }
   };
   
-  console.log('发送到MaaS的请求体:', JSON.stringify(requestBody, null, 2));
-  console.log('请求选项:', JSON.stringify(options, null, 2));
-  
   // 创建请求（与测试脚本完全相同的方式）
   const maasReq = https.request(options, (maasRes) => {
-    console.log('\n=== MaaS API 响应 ===');
-    console.log('状态码:', maasRes.statusCode);
-    console.log('响应头:', maasRes.headers);
+    console.log(`MaaS API 响应状态：${maasRes.statusCode}`);
     
     // 设置SSE响应头
     res.setHeader('Content-Type', 'text/event-stream');

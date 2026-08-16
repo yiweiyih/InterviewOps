@@ -131,3 +131,44 @@ test('interview service rejects repeated follow-up questions and falls back to a
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('interview service uses every saved focus area for retrieval and question generation', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
+  let retrievalQuery = '';
+  let questionPayload;
+
+  try {
+    const service = createInterviewService({
+      dataDir: tempDir,
+      callJson: async messages => {
+        questionPayload = JSON.parse(messages[1].content);
+        return {
+          text: '请结合具体经历说明你如何保障系统的工程质量。',
+          competency: '工程质量',
+          rationale: '考察重点训练领域',
+          expectedSignals: ['方案', '取舍', '验证']
+        };
+      },
+      retrieveKnowledge: async query => {
+        retrievalQuery = query;
+        return [];
+      }
+    });
+    service.updateWorkspace('user-a', {
+      profile: {
+        targetRole: '测试开发工程师',
+        focusAreas: ['系统设计', '工程质量', '性能与稳定性']
+      }
+    });
+
+    await service.startSession('user-a', { mode: 'comprehensive' });
+
+    assert.match(retrievalQuery, /系统设计/);
+    assert.match(retrievalQuery, /工程质量/);
+    assert.match(retrievalQuery, /性能与稳定性/);
+    assert.deepEqual(questionPayload.profile.focusAreas, ['系统设计', '工程质量', '性能与稳定性']);
+    assert.match(questionPayload.instruction, /历史问题/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

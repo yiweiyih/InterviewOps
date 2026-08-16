@@ -1,5 +1,7 @@
 [
+  { "mode": "comprehensive", "scores": { "problem": 4, "depth": 4, "evidence": 3, "communication": 5 }, "expectedAverage": 4 },
   { "mode": "project", "scores": { "problem": 4, "depth": 4, "ownership": 5, "communication": 4 }, "expectedAverage": 4.3 },
+  { "mode": "role", "scores": { "fundamentals": 4, "depth": 5, "tradeoff": 3, "evidence": 4 }, "expectedAverage": 4 },
   { "mode": "frontend", "scores": { "fundamentals": 5, "depth": 4, "tradeoff": 4, "communication": 3 }, "expectedAverage": 4 },
   { "mode": "agent", "scores": { "fundamentals": 4, "depth": 5, "tradeoff": 3, "evidence": 4 }, "expectedAverage": 4 },
   { "mode": "behavioral", "scores": { "structure": 4, "ownership": 4, "evidence": 3, "reflection": 5 }, "expectedAverage": 4 },

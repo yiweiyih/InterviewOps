@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Check, Clock, Microphone, Refresh, Trophy } from '@element-plus/icons-vue'
 import { dimensionLabels, interviewApi, scoreTone } from '../utils/interview'
-import { inferInterviewMode } from '../utils/interviewMode'
+import { inferInterviewQuestionCount, inferInterviewRecommendation } from '../utils/interviewMode'
 
 const loading = ref(true)
 const starting = ref(false)
@@ -12,10 +12,12 @@ const ending = ref(false)
 const isListening = ref(false)
 const session = ref(null)
 const modes = ref({})
+const workspace = ref(null)
 const answer = ref('')
 const showFeedback = ref(false)
 const elapsedSeconds = ref(0)
-const setup = reactive({ mode: 'project', difficulty: '进阶', questionCount: 4 })
+const recommendation = ref({ mode: 'comprehensive', reason: '' })
+const setup = reactive({ mode: 'comprehensive', difficulty: '进阶', questionCount: 4 })
 let timer = null
 let speechRecognition = null
 let dictationBase = ''
@@ -25,6 +27,15 @@ const SpeechRecognition = typeof window === 'undefined'
   ? null
   : window.SpeechRecognition || window.webkitSpeechRecognition
 const speechSupported = Boolean(SpeechRecognition)
+const visibleModes = computed(() => Object.fromEntries(
+  Object.entries(modes.value).filter(([, config]) => !config.hidden)
+))
+const focusAreas = computed(() => workspace.value?.profile?.focusAreas || [])
+const targetRole = computed(() => (
+  workspace.value?.profile?.targetRole
+  || workspace.value?.target?.jobTitle
+  || '未设置，将按通用能力出题'
+))
 
 const progress = computed(() => {
   if (!session.value) return 0
@@ -45,12 +56,15 @@ async function initialize() {
   try {
     const [workspaceData, sessionData] = await Promise.all([interviewApi.getWorkspace(), interviewApi.listSessions()])
     modes.value = workspaceData.modes
+    workspace.value = workspaceData.workspace
     const active = sessionData.sessions.find(item => item.status === 'active')
     if (active) {
       session.value = (await interviewApi.getSession(active.id)).session
       startTimer(session.value.startedAt)
     } else {
-      setup.mode = inferInterviewMode(workspaceData.workspace)
+      recommendation.value = inferInterviewRecommendation(workspaceData.workspace)
+      setup.mode = recommendation.value.mode
+      setup.questionCount = inferInterviewQuestionCount(workspaceData.workspace)
     }
   } catch (error) {
     ElMessage.error(error.message)
@@ -188,8 +202,15 @@ onBeforeUnmount(() => {
       </div>
 
       <article class="io-panel setup-card">
-        <span class="io-eyebrow">SESSION SETUP</span><h2>创建模拟面试</h2><p>建议第一次选择 4 题、进阶难度，大约 15—20 分钟。</p>
-        <label><span>训练模式</span><div class="mode-grid"><button v-for="(config,key) in modes" :key="key" :class="setup.mode === key && 'active'" @click="setup.mode = key"><strong>{{ config.label }}</strong><small>{{ config.description }}</small><em v-if="setup.mode === key"><el-icon><Check /></el-icon></em></button></div></label>
+        <span class="io-eyebrow">SESSION SETUP</span><h2>创建模拟面试</h2><p class="setup-description">建议第一次选择 4 题、进阶难度，大约 15—20 分钟。</p>
+        <div class="mode-field"><span>训练模式</span><div class="mode-grid"><button v-for="(config,key) in visibleModes" :key="key" :class="setup.mode === key && 'active'" @click="setup.mode = key"><strong>{{ config.label }}<mark v-if="recommendation.mode === key">画像推荐</mark></strong><small>{{ config.description }}</small><em v-if="setup.mode === key"><el-icon><Check /></el-icon></em></button></div></div>
+        <p class="recommendation-hint">推荐依据：{{ recommendation.reason }}。这是默认建议，你可以自由切换。</p>
+        <div class="targeting-summary">
+          <div class="targeting-heading"><div><span>本场出题依据</span><strong>{{ targetRole }}</strong></div><router-link to="/profile">调整画像</router-link></div>
+          <div v-if="focusAreas.length" class="targeting-tags"><span v-for="item in focusAreas" :key="item">{{ item }}</span></div>
+          <p v-else>尚未选择重点领域，将结合目标岗位、JD 和个人资料综合出题。</p>
+          <small v-if="focusAreas.length">以上 {{ focusAreas.length }} 项会参与资料检索，并在整场面试中优先轮换覆盖；默认题数会尽量与重点数量匹配。</small>
+        </div>
         <div class="setup-row">
           <label><span>难度</span><el-segmented v-model="setup.difficulty" :options="['基础','进阶','压力']" /></label>
           <label><span>问题数</span><el-input-number v-model="setup.questionCount" :min="2" :max="8" controls-position="right" /></label>
@@ -274,7 +295,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .interview-page { color: var(--io-ink); }.setup-layout { display: grid; grid-template-columns: minmax(0,.85fr) minmax(500px,1fr); gap: 30px; align-items: center; min-height: calc(100vh - 124px); max-width: 1220px; margin: 0 auto; }.setup-copy { padding: 30px; }.ready-pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #d8d5f6; border-radius: 30px; color: #66618f; background: #f4f2ff; font-size: 9px; font-weight: 700; letter-spacing: .12em; }.ready-pill span,.live-dot { width: 7px; height: 7px; border-radius: 50%; background: #2fc9a5; box-shadow: 0 0 0 4px rgba(47,201,165,.12); }.setup-copy h1 { max-width: 560px; margin: 20px 0 14px; font-size: clamp(33px,4vw,50px); line-height: 1.12; letter-spacing: -.04em; }.setup-copy > p { max-width: 560px; color: #75798f; font-size: 14px; line-height: 1.85; }.principles { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 27px; color: #696d81; font-size: 11px; }.principles b { margin-right: 4px; color: #6157e8; }.principles i { width: 3px; height: 3px; border-radius: 50%; background: #b9bbc7; }
-.setup-card { padding: 29px; }.setup-card h2 { margin-top: 6px; font-size: 24px; }.setup-card > p { margin: 6px 0 22px; color: #898c9e; font-size: 11px; }.setup-card label > span { display: block; margin-bottom: 8px; color: #55596e; font-size: 11px; font-weight: 600; }.mode-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }.mode-grid button { position: relative; min-height: 90px; padding: 14px; border: 1px solid #e4e5ed; border-radius: 12px; color: inherit; background: #fafafe; text-align: left; cursor: pointer; }.mode-grid button.active { border-color: #aaa3f5; background: #f2f0ff; box-shadow: inset 0 0 0 1px #aaa3f5; }.mode-grid strong { display: block; font-size: 12px; }.mode-grid small { display: block; margin-top: 6px; color: #9295a7; font-size: 9px; line-height: 1.5; }.mode-grid em { position: absolute; top: 9px; right: 9px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #fff; background: #6157e8; font-style: normal; }.setup-row { display: grid; grid-template-columns: 1fr 140px; gap: 15px; margin-top: 18px; }.setup-row :deep(.el-segmented) { width: 100%; }.start-button { width: 100%; margin-top: 22px; }.boundary { display: block; margin-top: 11px; color: #9b9eae; font-size: 9px; text-align: center; }
+.setup-card { padding: 29px; }.setup-card h2 { margin-top: 6px; font-size: 24px; }.setup-description { margin: 6px 0 22px; color: #898c9e; font-size: 11px; }.setup-card label > span,.mode-field > span { display: block; margin-bottom: 8px; color: #55596e; font-size: 11px; font-weight: 600; }.mode-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }.mode-grid button { position: relative; min-height: 90px; padding: 14px; border: 1px solid #e4e5ed; border-radius: 12px; color: inherit; background: #fafafe; text-align: left; cursor: pointer; }.mode-grid button.active { border-color: #aaa3f5; background: #f2f0ff; box-shadow: inset 0 0 0 1px #aaa3f5; }.mode-grid strong { display: flex; align-items: center; gap: 7px; padding-right: 20px; font-size: 12px; }.mode-grid mark { padding: 3px 6px; border-radius: 5px; color: #5b52d6; background: #e8e5ff; font-size: 8px; font-weight: 700; }.mode-grid small { display: block; margin-top: 6px; color: #9295a7; font-size: 9px; line-height: 1.5; }.mode-grid em { position: absolute; top: 9px; right: 9px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #fff; background: #6157e8; font-style: normal; }.recommendation-hint { margin: 9px 0 0; color: #8a8da0; font-size: 9px; line-height: 1.5; }.setup-row { display: grid; grid-template-columns: 1fr 140px; gap: 15px; margin-top: 18px; }.setup-row :deep(.el-segmented) { width: 100%; }.start-button { width: 100%; margin-top: 22px; }.boundary { display: block; margin-top: 11px; color: #9b9eae; font-size: 9px; text-align: center; }
+.targeting-summary { margin-top: 14px; padding: 13px 14px; border: 1px solid #e7e5f8; border-radius: 11px; background: #faf9ff; }.targeting-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.targeting-heading > div { display: flex; min-width: 0; align-items: baseline; gap: 8px; }.targeting-heading span { flex: 0 0 auto; color: #8c89a4; font-size: 9px; }.targeting-heading strong { overflow: hidden; color: #3d3b54; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.targeting-heading a { flex: 0 0 auto; color: #6259db; font-size: 9px; text-decoration: none; }.targeting-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }.targeting-tags span { padding: 4px 7px; border-radius: 6px; color: #5c55c7; background: #eeecff; font-size: 9px; }.targeting-summary > p,.targeting-summary > small { display: block; margin-top: 9px; color: #9295a7; font-size: 9px; line-height: 1.55; }
 .room-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 1200px; margin: 0 auto; padding: 9px 4px 15px; }.room-header > div:first-child { display: grid; grid-template-columns: auto 1fr; gap: 2px 9px; align-items: center; }.room-header strong { font-size: 13px; }.room-header small { grid-column: 2; color: #9295a5; font-size: 9px; }.room-actions { display: flex; align-items: center; gap: 12px; }.room-actions > span { display: flex; align-items: center; gap: 5px; color: #65697e; font-size: 11px; font-variant-numeric: tabular-nums; }.progress-line { display: flex; align-items: center; gap: 12px; max-width: 1200px; margin: 0 auto 14px; }.progress-line .el-progress { flex: 1; }.progress-line :deep(.el-progress-bar__inner) { background: linear-gradient(90deg,#6157e8,#8d84f2); }.progress-line span { color: #898c9d; font-size: 9px; }
 .question-layout { display: grid; grid-template-columns: minmax(0,1fr) 240px; gap: 15px; max-width: 1200px; margin: 0 auto; }.question-card { padding: 30px; }.question-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.question-meta span { color: #817ae0; font-size: 9px; font-weight: 800; letter-spacing: .15em; }.question-meta em { padding: 5px 8px; border-radius: 7px; color: #5c5797; background: #f0eeff; font-size: 9px; font-style: normal; }.question-card > h1 { max-width: 860px; margin: 17px 0 10px; overflow-wrap: anywhere; font-size: clamp(20px,1.8vw,26px); font-weight: 650; line-height: 1.55; letter-spacing: -.015em; text-wrap: pretty; }.rationale { max-width: 860px; color: #8c8f9f; font-size: 10px; line-height: 1.65; }.answer-area { margin-top: 24px; padding-top: 18px; border-top: 1px solid #ececf2; }.answer-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }.answer-heading strong { font-size: 11px; }.answer-tools { display: flex; align-items: center; gap: 9px; }.answer-tools > span { color: #999cab; font-size: 9px; }.dictation-button { min-width: 92px; }.listening-hint { display: flex; align-items: center; gap: 7px; margin: -1px 0 9px; color: #d14a55; font-size: 10px; }.listening-hint span { width: 7px; height: 7px; border-radius: 50%; background: #e5535f; box-shadow: 0 0 0 4px rgba(229,83,95,.12); animation: listening-pulse 1.4s ease-in-out infinite; }.answer-area :deep(.el-textarea__inner) { min-height: 210px; padding: 15px; font-size: 13px; line-height: 1.75; }.submit-row,.next-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 16px; }.submit-row p,.next-row p { color: #999baa; font-size: 9px; }.interview-tip { align-self: start; padding: 21px; }.interview-tip > span { color: #8b86c1; font-size: 9px; font-weight: 700; letter-spacing: .12em; }.interview-tip h3 { margin-top: 7px; font-size: 15px; }.interview-tip ol { display: grid; gap: 14px; margin-top: 20px; list-style: none; counter-reset: item; }.interview-tip li { position: relative; padding-left: 13px; border-left: 2px solid #e2e0fa; }.interview-tip b { font-size: 11px; }.interview-tip p { margin-top: 3px; color: #9699a9; font-size: 9px; line-height: 1.55; }
 @keyframes listening-pulse { 50% { opacity: .45; transform: scale(.82); } }
