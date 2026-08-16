@@ -80,6 +80,53 @@ test('interview service can end an active session before the first answer', asyn
     assert.equal(completed.status, 'completed');
     assert.equal(completed.report.answeredQuestions, 0);
     assert.equal(completed.report.overallScore, 0);
+    assert.equal(service.getSummary('user-a').completedSessions, 0);
+    assert.equal(service.getSummary('user-a').averageScore, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('interview service rejects repeated follow-up questions and falls back to a new dimension', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
+  let questionCalls = 0;
+  const repeatedQuestion = '你提到通过路由懒加载和拆包优化首屏性能，请具体说明你如何确定拆分方案并验证效果？';
+
+  try {
+    const service = createInterviewService({
+      dataDir: tempDir,
+      callJson: async messages => {
+        if (messages[0].content.includes('复盘教练')) {
+          return {
+            scores: { problem: 4, depth: 4, ownership: 4, communication: 4 },
+            summary: '回答包含方案和验证方法',
+            evidence: ['使用性能指标验证'],
+            strengths: ['说明了个人决策'],
+            missingPoints: ['补充业务价值'],
+            betterStructure: '背景—决策—取舍—结果'
+          };
+        }
+        questionCalls += 1;
+        return {
+          text: repeatedQuestion,
+          competency: '性能优化',
+          rationale: '考察性能优化方法',
+          expectedSignals: ['分析', '方案', '验证']
+        };
+      },
+      retrieveKnowledge: async () => []
+    });
+
+    const session = await service.startSession('user-a', { mode: 'project', questionCount: 2 });
+    const afterFirstAnswer = await service.answerSession(
+      'user-a',
+      session.id,
+      '我先用性能面板定位首屏瓶颈，再拆分路由和重依赖，并通过固定网络条件下的 FCP 数据验证效果。'
+    );
+
+    assert.equal(questionCalls, 3);
+    assert.notEqual(afterFirstAnswer.currentQuestion.text, repeatedQuestion);
+    assert.match(afterFirstAnswer.currentQuestion.text, /尚未讨论/);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

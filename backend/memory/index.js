@@ -105,7 +105,7 @@ async function extractAndSaveMemories(userMsg, assistantReply, callLLM, userId) 
     for (const fact of facts) {
       if (fact.confidence >= 0.7) {
         await saveMemory(fact.key, fact.value, userId);
-        console.log(`[Memory] 保存记忆: ${fact.key} = ${fact.value}`);
+        console.log('[Memory] 保存用户记忆成功');
       }
     }
   } catch (e) {
