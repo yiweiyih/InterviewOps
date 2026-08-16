@@ -104,6 +104,7 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
         workspace.target.jobTitle,
         workspace.target.company,
         getMode(mode).label,
+        ...(workspace.profile.focusAreas || []),
         workspace.target.jobDescription.slice(0, 500)
       ].filter(Boolean).join(' ');
       return await retrieveKnowledge(query, 5, userId);
@@ -122,7 +123,7 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
       const payload = await callJson([
         {
           role: 'system',
-          content: `你是严格但友善的技术面试官。生成一题可追问、可基于事实评分的问题。候选人的“目标方向”是最高优先级，具体岗位和 JD 只用于补充上下文。不得复述或改写已问问题，必须切换尚未覆盖的经历、证据点或技术维度；如果上一题讨论性能，就优先转向架构、可靠性、业务价值、协作或其他未覆盖维度。问题聚焦一个核心主题，最多包含两个子问题，尽量控制在 160 个汉字内。只输出 JSON：{"text":"问题","competency":"考察能力","rationale":"为什么问","expectedSignals":["优秀回答信号"]}。不要泄露参考答案。`
+          content: `你是严格但友善的技术面试官。生成一题可追问、可基于事实评分的问题。候选人的“目标方向”是最高优先级，具体岗位和 JD 用于补充上下文。所有技术领域都必须来自目标方向、JD、重点训练领域或候选人资料；没有相关依据时，不得自行假设候选人属于前端、后端、测试、Agent 或其他岗位。重点训练领域是优先出题范围；存在多个领域时，应在整场面试中轮换覆盖，优先选择尚未考察的领域，不要把多个领域强行塞进同一道题。不得复述或改写已问问题，必须切换尚未覆盖的经历、证据点或技术维度；如果上一题讨论性能，就优先转向架构、可靠性、业务价值、协作或其他未覆盖维度。问题聚焦一个核心主题，最多包含两个子问题，尽量控制在 160 个汉字内。只输出 JSON：{"text":"问题","competency":"考察能力","rationale":"为什么问","expectedSignals":["优秀回答信号"]}。不要泄露参考答案。`
         },
         {
           role: 'user',
@@ -244,7 +245,9 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
     },
 
     async startSession(userId, options = {}) {
-      const mode = INTERVIEW_MODES[options.mode] ? options.mode : 'project';
+      const mode = INTERVIEW_MODES[options.mode] && !INTERVIEW_MODES[options.mode].hidden
+        ? options.mode
+        : 'comprehensive';
       const difficulty = ['基础', '进阶', '压力'].includes(options.difficulty) ? options.difficulty : '进阶';
       const questionCount = Math.min(8, Math.max(2, Number(options.questionCount) || 4));
       const workspace = store.getWorkspace(userId);

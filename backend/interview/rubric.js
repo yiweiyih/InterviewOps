@@ -1,23 +1,35 @@
 const INTERVIEW_MODES = Object.freeze({
+  comprehensive: {
+    label: '综合模拟',
+    description: '结合目标岗位、JD 与个人资料，覆盖项目、岗位能力和行为问题',
+    dimensions: ['problem', 'depth', 'evidence', 'communication']
+  },
   project: {
     label: '项目深挖',
     description: '围绕项目价值、架构取舍、指标与个人贡献连续追问',
     dimensions: ['problem', 'depth', 'ownership', 'communication']
   },
-  frontend: {
-    label: '前端专项',
-    description: '覆盖浏览器、工程化、性能、框架原理与编码取舍',
-    dimensions: ['fundamentals', 'depth', 'tradeoff', 'communication']
-  },
-  agent: {
-    label: 'Agent / RAG',
-    description: '检验 Agent 编排、RAG 链路、评测与可靠性设计',
+  role: {
+    label: '岗位专项',
+    description: '根据目标方向和 JD，动态考察岗位基础、场景方案与工程取舍',
     dimensions: ['fundamentals', 'depth', 'tradeoff', 'evidence']
   },
   behavioral: {
     label: '行为面试',
     description: '通过 STAR 结构检验协作、推动力、复盘与成长',
     dimensions: ['structure', 'ownership', 'evidence', 'reflection']
+  },
+  frontend: {
+    label: '前端专项',
+    description: '覆盖浏览器、工程化、性能、框架原理与编码取舍',
+    dimensions: ['fundamentals', 'depth', 'tradeoff', 'communication'],
+    hidden: true
+  },
+  agent: {
+    label: 'Agent / RAG',
+    description: '检验 Agent 编排、RAG 链路、评测与可靠性设计',
+    dimensions: ['fundamentals', 'depth', 'tradeoff', 'evidence'],
+    hidden: true
   }
 });
 
@@ -48,7 +60,7 @@ function toStringList(value, limit = 4) {
 }
 
 function getMode(mode) {
-  return INTERVIEW_MODES[mode] || INTERVIEW_MODES.project;
+  return INTERVIEW_MODES[mode] || INTERVIEW_MODES.comprehensive;
 }
 
 function normalizeQuestion(value, fallbackCompetency = '综合能力') {
