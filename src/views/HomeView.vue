@@ -30,8 +30,8 @@ const dashboard = ref({
 })
 
 const interview = computed(() => dashboard.value.interview)
-const targetTitle = computed(() => interview.value.workspace.target.jobTitle
-  || interview.value.workspace.profile.targetRole
+const targetTitle = computed(() => interview.value.workspace.profile.targetRole
+  || interview.value.workspace.target.jobTitle
   || '等待设置目标岗位')
 const company = computed(() => interview.value.workspace.target.company || '目标公司待补充')
 const nextStep = computed(() => {

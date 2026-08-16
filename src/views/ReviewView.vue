@@ -12,7 +12,7 @@ const detailLoading = ref(false)
 const sessions = ref([])
 const selected = ref(null)
 
-const completedCount = computed(() => sessions.value.filter(item => item.status === 'completed').length)
+const completedCount = computed(() => sessions.value.filter(item => item.report?.answeredQuestions > 0).length)
 const averageScore = computed(() => {
   const scored = sessions.value.filter(item => item.report?.overallScore)
   return scored.length ? Math.round(scored.reduce((sum,item) => sum + item.report.overallScore, 0) / scored.length) : 0
@@ -59,14 +59,14 @@ onMounted(loadSessions)
         <div class="io-section-heading"><div><span class="io-eyebrow">TIMELINE</span><h2>训练记录</h2></div></div>
         <div class="archive-list">
           <button v-for="item in sessions" :key="item.id" :class="selected?.id === item.id && 'active'" @click="selectSession(item.id)">
-            <span :class="['mini-score', item.status, scoreTone(item.report?.overallScore || 0)]">{{ item.report?.overallScore ?? '··' }}</span>
-            <div><strong>{{ item.title }}</strong><p>{{ formatDate(item.startedAt) }}</p><small>{{ item.answeredQuestions }}/{{ item.questionCount }} 题 · {{ item.status === 'completed' ? '已复盘' : '进行中' }}</small></div>
+            <span :class="['mini-score', item.status, scoreTone(item.report?.overallScore || 0)]">{{ item.report?.answeredQuestions ? item.report.overallScore : '··' }}</span>
+            <div><strong>{{ item.title }}</strong><p>{{ formatDate(item.startedAt) }}</p><small>{{ item.answeredQuestions }}/{{ item.questionCount }} 题 · {{ item.status === 'completed' ? (item.report?.answeredQuestions ? '已复盘' : '已结束') : '进行中' }}</small></div>
           </button>
         </div>
       </aside>
 
       <main v-loading="detailLoading" class="detail-column">
-        <template v-if="selected?.report">
+        <template v-if="selected?.report?.answeredQuestions">
           <article class="score-overview io-panel">
             <div><span class="io-eyebrow">PERFORMANCE SNAPSHOT</span><h2>{{ selected.title }}</h2><p>{{ formatDate(selected.startedAt) }} · {{ selected.report.answeredQuestions }} 道问题</p></div>
             <div :class="['hero-score',scoreTone(selected.report.overallScore)]"><strong>{{ selected.report.overallScore }}</strong><span>综合表现</span></div>
@@ -89,6 +89,7 @@ onMounted(loadSessions)
             </el-collapse>
           </article>
         </template>
+        <article v-else-if="selected?.report" class="io-panel active-session"><span><el-icon><DataAnalysis /></el-icon></span><h2>本场没有可评分的回答</h2><p>这场训练在提交第一道回答前结束，因此不会生成能力评分，也不会计入平均表现。</p><el-button type="primary" @click="router.push('/interview')">重新开始一场</el-button></article>
         <article v-else-if="selected" class="io-panel active-session"><span><el-icon><Microphone /></el-icon></span><h2>这场训练还在进行中</h2><p>完成或提前结束模拟后，这里会生成能力雷达、证据链和补强行动。</p><el-button type="primary" @click="router.push('/interview')">继续模拟面试</el-button></article>
       </main>
     </section>

@@ -1,17 +1,18 @@
 <script setup>
 import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import { apiUrl } from '../utils/api'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 
 const activeTab = ref('login')
 const loading = ref(false)
-const errorMsg = ref('')
+const errorMsg = ref(route.query.expired ? '登录状态已失效，请重新登录' : '')
 
 const loginForm = reactive({ username: '', password: '' })
 const registerForm = reactive({ username: '', password: '', confirm: '' })

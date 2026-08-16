@@ -145,15 +145,15 @@ async function handleRpc(method, params) {
       validateToolArguments(name, args, { allowInternal: true });
       if (name === 'get_weather') {
         if (!args?.city) throw { code: -32602, message: '缺少参数: city' };
-        console.log(`[MCP] 调用 get_weather，城市: ${args.city}`);
+        console.log('[MCP] 调用 get_weather');
         const weather = await fetchWeather(args.city);
-        console.log(`[MCP] 天气数据:`, weather);
+        console.log('[MCP] get_weather 执行成功');
         return { content: [{ type: 'text', text: JSON.stringify(weather) }] };
       } else if (name === 'search_web') {
         if (!args?.query) throw { code: -32602, message: '缺少参数: query' };
-        console.log(`[MCP] 调用 search_web，关键词: ${args.query}`);
+        console.log('[MCP] 调用 search_web');
         const result = await searchWeb(args.query);
-        console.log(`[MCP] 搜索结果:`, result);
+        console.log('[MCP] search_web 执行成功');
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } else if (name === 'get_todos') {
         const todos = readTodos(args?.userId);
@@ -164,7 +164,7 @@ async function handleRpc(method, params) {
         const newTodo = { id: Date.now(), text: args.text.trim(), completed: false };
         todos.push(newTodo);
         writeTodos(args?.userId, todos);
-        console.log(`[MCP] 添加待办: ${args.text}`);
+        console.log(`[MCP] 添加待办成功，当前共 ${todos.length} 条`);
         return { content: [{ type: 'text', text: JSON.stringify({ todo: newTodo, todos }) }] };
       } else if (name === 'delete_todo') {
         if (args?.id === undefined) throw { code: -32602, message: '缺少参数: id' };
@@ -193,7 +193,7 @@ async function handleRpc(method, params) {
         const note = { id: Date.now(), title: args.title.trim(), text: args.text.trim(), created_at: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) };
         notes.push(note);
         writeNotes(args?.userId, notes);
-        console.log(`[MCP] 写入笔记: ${args.title}`);
+        console.log(`[MCP] 写入笔记成功，当前共 ${notes.length} 条`);
         return { content: [{ type: 'text', text: JSON.stringify({ note, total: notes.length }) }] };
       } else if (name === 'read_notes') {
         const notes = readNotes(args?.userId);

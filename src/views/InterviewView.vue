@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Check, Clock, Microphone, Refresh, Trophy } from '@element-plus/icons-vue'
 import { dimensionLabels, interviewApi, scoreTone } from '../utils/interview'
+import { inferInterviewMode } from '../utils/interviewMode'
 
 const loading = ref(true)
 const starting = ref(false)
@@ -48,6 +49,8 @@ async function initialize() {
     if (active) {
       session.value = (await interviewApi.getSession(active.id)).session
       startTimer(session.value.startedAt)
+    } else {
+      setup.mode = inferInterviewMode(workspaceData.workspace)
     }
   } catch (error) {
     ElMessage.error(error.message)
@@ -246,7 +249,7 @@ onBeforeUnmount(() => {
       </section>
     </template>
 
-    <section v-else class="report-layout">
+    <section v-else-if="session.report.answeredQuestions > 0" class="report-layout">
       <article class="report-hero">
         <span class="trophy"><el-icon><Trophy /></el-icon></span><div><span class="io-eyebrow">SESSION COMPLETE</span><h1>这场模拟已经形成能力基线</h1><p>{{ session.title }} · 完成 {{ session.report.answeredQuestions }} 道问题</p></div><div :class="['overall-score',scoreTone(session.report.overallScore)]"><strong>{{ session.report.overallScore }}</strong><span>综合表现 / 100</span></div>
       </article>
@@ -255,6 +258,16 @@ onBeforeUnmount(() => {
         <article class="io-panel action-panel"><div class="io-section-heading"><div><span class="io-eyebrow">NEXT ACTIONS</span><h2>下一轮补强重点</h2></div></div><ol v-if="session.report.nextActions.length"><li v-for="(item,index) in session.report.nextActions" :key="item"><b>{{ String(index+1).padStart(2,'0') }}</b><span>{{ item }}</span></li></ol><p v-else>本场答题较少，完成更多问题后会生成更具体的建议。</p></article>
       </div>
       <div class="report-actions"><el-button size="large" @click="$router.push(`/reviews?session=${session.id}`)">查看完整复盘档案</el-button><el-button type="primary" size="large" :icon="Refresh" @click="resetSession">再练一场</el-button></div>
+    </section>
+
+    <section v-else class="report-layout">
+      <article class="io-panel empty-report">
+        <span class="trophy"><el-icon><Refresh /></el-icon></span>
+        <span class="io-eyebrow">SESSION ENDED</span>
+        <h1>这场模拟已结束，暂无能力评分</h1>
+        <p>本场没有提交回答，因此不会把 0 分计入能力基线。准备好后可以重新开始一场。</p>
+        <el-button type="primary" size="large" :icon="Refresh" @click="resetSession">重新开始</el-button>
+      </article>
     </section>
   </div>
 </template>
@@ -267,6 +280,7 @@ onBeforeUnmount(() => {
 @keyframes listening-pulse { 50% { opacity: .45; transform: scale(.82); } }
 .feedback-layout { max-width: 980px; margin: 0 auto; }.feedback-card { padding: 30px; }.feedback-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; }.feedback-top h1 { max-width: 700px; margin-top: 7px; font-size: 23px; }.question-score { display: flex; align-items: baseline; gap: 3px; color: #6157e8; font-size: 32px; font-weight: 800; }.question-score small { color: #9997b3; font-size: 11px; }.score-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin-top: 24px; }.score-grid > div { padding: 13px; border-radius: 11px; background: #f8f8fc; }.score-grid span { color: #777a8f; font-size: 9px; }.score-grid strong { display: block; margin: 5px 0; font-size: 18px; }.score-grid :deep(.el-progress-bar__inner) { background: #756bed; }.feedback-columns { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin-top: 14px; }.feedback-block { padding: 17px; border-radius: 12px; }.feedback-block.good { background: #eefaf7; }.feedback-block.gap { background: #fff6eb; }.feedback-block > span,.better-answer > span { font-size: 10px; font-weight: 700; }.feedback-block ul { display: grid; gap: 7px; margin: 11px 0 0 17px; color: #686c7c; font-size: 10px; line-height: 1.6; }.better-answer { margin-top: 12px; padding: 17px; border: 1px solid #e6e4fa; border-radius: 12px; background: #faf9ff; }.better-answer p { margin-top: 7px; color: #6f7183; font-size: 11px; line-height: 1.7; }
 .report-layout { max-width: 1050px; margin: 0 auto; }.report-hero { display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; padding: 28px 32px; border-radius: 20px; color: #fff; background: linear-gradient(130deg,#242342,#413b8d); }.trophy { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 15px; color: #f8d787; background: rgba(255,255,255,.1); font-size: 24px; }.report-hero .io-eyebrow { color: #aaa7df; }.report-hero h1 { margin-top: 5px; font-size: 24px; }.report-hero p { margin-top: 5px; color: #bdbbd7; font-size: 10px; }.overall-score { display: flex; flex-direction: column; align-items: flex-end; }.overall-score strong { font-size: 45px; line-height: 1; }.overall-score span { margin-top: 5px; color: #bdbbd7; font-size: 9px; }.report-grid { display: grid; grid-template-columns: 1fr .75fr; gap: 15px; margin-top: 15px; }.dimension-panel,.action-panel { padding: 23px; }.dimension-list { display: grid; gap: 14px; }.dimension-list > div { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 10px; }.dimension-list span { color: #696d80; font-size: 10px; }.dimension-list :deep(.el-progress-bar__inner) { background: #6d63eb; }.action-panel ol { display: grid; gap: 9px; list-style: none; }.action-panel li { display: grid; grid-template-columns: 26px 1fr; gap: 9px; padding: 11px; border-radius: 10px; background: #faf8ff; }.action-panel b { color: #6157e8; font-size: 9px; }.action-panel span,.action-panel > p { color: #676a7d; font-size: 10px; line-height: 1.55; }.report-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }.report-actions .el-button + .el-button { margin-left: 0; }
+.empty-report { display: flex; min-height: 360px; flex-direction: column; align-items: center; justify-content: center; padding: 40px; text-align: center; }.empty-report .trophy { color: #6157e8; background: #efedff; }.empty-report .io-eyebrow { margin-top: 17px; }.empty-report h1 { margin-top: 7px; font-size: 24px; }.empty-report p { max-width: 520px; margin: 9px 0 20px; color: #85899c; font-size: 11px; line-height: 1.7; }
 @media(max-width:1000px){.setup-layout{grid-template-columns:1fr;align-items:start}.setup-copy{padding:20px 0}.question-layout{grid-template-columns:1fr}.interview-tip{display:none}}
 @media(max-width:720px){.mode-grid,.feedback-columns,.report-grid{grid-template-columns:1fr}.score-grid{grid-template-columns:repeat(2,1fr)}.room-header,.feedback-top,.submit-row,.next-row{align-items:flex-start;flex-direction:column}.question-card{padding:22px}.answer-heading{align-items:flex-start;flex-direction:column}.answer-tools{justify-content:space-between;width:100%}.report-hero{grid-template-columns:auto 1fr}.overall-score{grid-column:1/-1;align-items:flex-start}.report-actions{flex-direction:column}.report-actions .el-button{width:100%}}
 </style>

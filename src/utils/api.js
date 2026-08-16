@@ -25,6 +25,11 @@ export async function requestJson(path, options = {}) {
     : options.headers)
   const response = await fetch(apiUrl(path), { ...options, headers })
   const data = await response.json().catch(() => ({}))
+  if (response.status === 401 && path !== '/api/login') {
+    localStorage.removeItem('auth-user')
+    if (window.location.pathname !== '/login') window.location.replace('/login?expired=1')
+    throw new Error('登录状态已失效，请重新登录')
+  }
   if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`)
   return data
 }
