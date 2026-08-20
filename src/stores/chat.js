@@ -111,8 +111,8 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  const upsertToolCall = ({ name, status, input, result }) => {
-    const session = currentSession.value
+  const upsertToolCall = ({ name, status, input, result }, sessionId = currentSessionId.value) => {
+    const session = sessions.get(sessionId)
     if (!session) return
     const msgs = session.messages
     const existing = [...msgs].reverse().find(m => m.type === 'tool_call' && m.name === name && m.status === 'running')

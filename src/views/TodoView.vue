@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Clock, Delete, Plus } from '@element-plus/icons-vue'
 import TodoItem from '../components/TodoItem.vue'
 import { useTodoStore } from '../stores/todo'
@@ -43,6 +43,34 @@ async function runAction(action, failureMessage) {
     ElMessage.error(error.message || failureMessage)
   }
 }
+
+async function confirmDeleteTodo(id) {
+  try {
+    await ElMessageBox.confirm('删除后无法恢复，确定移除这项提升动作吗？', '确认删除？', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await runAction(() => todoStore.deleteTodo(id), '删除任务失败')
+}
+
+async function confirmBatchDelete() {
+  const count = todoStore.selectedTodoIds.size
+  if (!count) return
+  try {
+    await ElMessageBox.confirm(`将删除选中的 ${count} 项提升动作，且无法恢复。`, '确认批量删除？', {
+      confirmButtonText: `删除 ${count} 项`,
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await runAction(todoStore.batchDeleteTodos, '批量删除失败')
+}
 </script>
 
 <template>
@@ -82,7 +110,7 @@ async function runAction(action, failureMessage) {
         <div v-if="todoStore.todos.length" class="batch-actions">
           <el-checkbox :model-value="todoStore.isAllSelected" @change="todoStore.toggleAllSelection">全选</el-checkbox>
           <el-button type="danger" text :icon="Delete" :disabled="!todoStore.hasSelectedTodos"
-            @click="runAction(todoStore.batchDeleteTodos, '批量删除失败')">
+            @click="confirmBatchDelete">
             删除选中（{{ todoStore.selectedTodoIds.size }}）
           </el-button>
         </div>
@@ -96,7 +124,7 @@ async function runAction(action, failureMessage) {
         </div>
         <TodoItem v-for="todo in todoStore.todos" v-else :key="todo.id" :todo="todo"
           :is-selected="todoStore.selectedTodoIds.has(todo.id)"
-          @delete="id => runAction(() => todoStore.deleteTodo(id), '删除任务失败')"
+          @delete="confirmDeleteTodo"
           @toggle="id => runAction(() => todoStore.toggleTodo(id), '更新状态失败')"
           @toggle-selection="todoStore.toggleTodoSelection" />
       </div>

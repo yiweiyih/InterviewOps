@@ -6,7 +6,7 @@ import VirtualList from '../components/VirtualList.vue'
 const MarkdownRenderer = defineAsyncComponent(() =>
   import('../components/MarkdownRenderer.vue')
 )
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { useTodoStore } from '../stores/todo'
 import { streamChat } from '../utils/sseClient'
@@ -52,17 +52,31 @@ const throttledSave = () => {
 }
 
 const handleCreateSession = () => {
+  if (isGenerating.value) return
   chatStore.createSession()
   chatStore.saveToStorage()
   nextTick(scrollToBottom)
 }
 
 const handleSwitchSession = (id) => {
+  if (isGenerating.value) return
   chatStore.setCurrentSession(id)
   nextTick(scrollToBottom)
 }
 
-const handleDeleteSession = (id) => {
+const handleDeleteSession = async (id) => {
+  const session = chatStore.sessions.get(id)
+  try {
+    await ElMessageBox.confirm(
+      `删除“${session?.title || '当前会话'}”后将无法恢复。`,
+      '确认删除会话？',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
+  if (id === chatStore.currentSessionId && isGenerating.value) handleStop()
   chatStore.deleteSession(id)
   chatStore.saveToStorage()
   nextTick(scrollToBottom)
@@ -82,44 +96,42 @@ watch(
   { flush: 'post' }
 )
 
-// 发送消息
-const sendMessage = async () => {
-  if (!inputMessage.value.trim() || isGenerating.value) return
-
-  chatStore.addUserMessage(inputMessage.value.trim())
-  inputMessage.value = ''
-  isGenerating.value = true
-
-  // 滑动窗口：只取最近 20 条，过滤工具调用气泡和空 assistant 消息，避免污染上下文
+const buildApiMessages = (sessionMessages) => {
   const WINDOW_SIZE = 20
-  const apiMessages = messages.value
+  return sessionMessages
     .filter(m => m.type !== 'tool_call' && m.content !== '')
     .slice(-WINDOW_SIZE)
     .map(msg => ({ role: msg.role, content: msg.content }))
+}
 
+const flushPendingChunks = (aiReply) => {
+  if (flushTimer) {
+    clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  if (chunkBuffer && aiReply) aiReply.content += chunkBuffer
+  chunkBuffer = ''
+}
+
+const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false } = {}) => {
+  const sessionId = chatStore.currentSessionId
   const aiReply = chatStore.startAssistantMessage()
-  if (aiReply) aiReply.status = 'interrupted'
+  if (!aiReply || !sessionId) return
+
+  isGenerating.value = true
+  aiReply.status = 'streaming'
+  chunkBuffer = ''
   chatStore.saveToStorage()
 
   const onChunk = (content) => {
-    if (!aiReply) return
     chunkBuffer += content
-    if (!flushTimer) {
-      flushTimer = setTimeout(() => {
-        aiReply.content += chunkBuffer
-        chunkBuffer = ''
-        flushTimer = null
-        throttledSave()
-      }, 50)
-    }
-  }
-
-  const onCitations = (citations) => {
-    if (aiReply) aiReply.citations = citations
-  }
-
-  const onToolCall = (data) => {
-    chatStore.upsertToolCall(data)
+    if (flushTimer) return
+    flushTimer = setTimeout(() => {
+      aiReply.content += chunkBuffer
+      chunkBuffer = ''
+      flushTimer = null
+      throttledSave()
+    }, 50)
   }
 
   abortController = new AbortController()
@@ -130,24 +142,41 @@ const sendMessage = async () => {
       apiMessages,
       onChunk,
       abortController.signal,
-      onCitations,
-      onToolCall
+      citations => { aiReply.citations = citations },
+      data => chatStore.upsertToolCall(data, sessionId)
     )
-    if (aiReply) aiReply.status = 'done'
+    aiReply.status = 'done'
   } catch (err) {
+    aiReply.status = 'interrupted'
     if (err.name !== 'AbortError') {
-      ElMessage.error(err.message || '获取AI回复失败，请稍后重试')
+      ElMessage.error(err.message || failureMessage)
     }
   } finally {
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
-    if (chunkBuffer && aiReply) { aiReply.content += chunkBuffer; chunkBuffer = '' }
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+    flushPendingChunks(aiReply)
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
     chatStore.saveToStorage()
     abortController = null
     isGenerating.value = false
     scrollToBottom()
-    await todoStore.fetchTodos()
+    if (refreshTodos) await todoStore.fetchTodos().catch(() => {})
   }
+}
+
+// 发送消息
+const sendMessage = async () => {
+  if (!inputMessage.value.trim() || isGenerating.value) return
+
+  chatStore.addUserMessage(inputMessage.value.trim())
+  inputMessage.value = ''
+
+  await runGeneration(
+    buildApiMessages(messages.value),
+    '获取 AI 回复失败，请稍后重试',
+    { refreshTodos: true }
+  )
 }
 
 const handleRegenerate = async (msgId) => {
@@ -155,58 +184,14 @@ const handleRegenerate = async (msgId) => {
   if (!session || isGenerating.value) return
 
   const idx = session.messages.findIndex(m => m.id === msgId)
-  if (idx !== -1) session.messages.splice(idx, 1)
+  if (idx === -1) return
 
-  isGenerating.value = true
-
-  const WINDOW_SIZE = 20
-  const apiMessages = session.messages
-    .filter(m => m.type !== 'tool_call' && m.content !== '')
-    .slice(-WINDOW_SIZE)
-    .map(msg => ({ role: msg.role, content: msg.content }))
-
-  const aiReply = chatStore.startAssistantMessage()
-  if (aiReply) aiReply.status = 'interrupted'
-  chatStore.saveToStorage()
-
-  const onChunk = (content) => {
-    if (!aiReply) return
-    chunkBuffer += content
-    if (!flushTimer) {
-      flushTimer = setTimeout(() => {
-        aiReply.content += chunkBuffer
-        chunkBuffer = ''
-        flushTimer = null
-        throttledSave()
-      }, 50)
-    }
+  session.messages.splice(idx, 1)
+  while (session.messages[idx]?.type === 'tool_call') {
+    session.messages.splice(idx, 1)
   }
 
-  abortController = new AbortController()
-
-  try {
-    await streamChat(
-      apiUrl('/api/chat'),
-      apiMessages,
-      onChunk,
-      abortController.signal,
-      null,
-      (data) => chatStore.upsertToolCall(data)
-    )
-    if (aiReply) aiReply.status = 'done'
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      ElMessage.error(err.message || '重新生成失败，请稍后重试')
-    }
-  } finally {
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
-    if (chunkBuffer && aiReply) { aiReply.content += chunkBuffer; chunkBuffer = '' }
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
-    chatStore.saveToStorage()
-    abortController = null
-    isGenerating.value = false
-    scrollToBottom()
-  }
+  await runGeneration(buildApiMessages(session.messages), '重新生成失败，请稍后重试')
 }
 
 onMounted(() => {
@@ -220,14 +205,18 @@ onMounted(() => {
     <div class="session-bar">
       <div class="session-list">
         <div v-for="session in sessionList" :key="session.id"
-          :class="['session-tab', session.id === chatStore.currentSessionId ? 'active' : '']"
-          @click="handleSwitchSession(session.id)">
-          <span class="session-indicator"></span>
-          <span class="session-title">{{ session.title || '会话' }}</span>
-          <span class="session-close" title="删除会话" @click.stop="handleDeleteSession(session.id)">×</span>
+          :class="['session-tab', session.id === chatStore.currentSessionId ? 'active' : '']">
+          <button class="session-select" type="button" :disabled="isGenerating"
+            :aria-current="session.id === chatStore.currentSessionId ? 'page' : undefined"
+            @click="handleSwitchSession(session.id)">
+            <span class="session-indicator"></span>
+            <span class="session-title">{{ session.title || '会话' }}</span>
+          </button>
+          <button class="session-close" type="button" title="删除会话" :aria-label="`删除会话：${session.title || '会话'}`"
+            @click.stop="handleDeleteSession(session.id)">×</button>
         </div>
       </div>
-      <button class="session-add" @click="handleCreateSession">+ 新建会话</button>
+      <button class="session-add" :disabled="isGenerating" @click="handleCreateSession">+ 新建会话</button>
     </div>
 
     <section v-if="showStarter" class="starter-panel">
@@ -360,13 +349,28 @@ onMounted(() => {
   background-color: #f8fafc;
   color: #526071;
   font-size: 13px;
+}
+
+.session-select {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
   cursor: pointer;
 }
+.session-select:disabled { cursor: wait; }
 
 .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-indicator { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: #a8b2bf; }
 
 .session-close {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
   font-size: 15px;
   line-height: 1;
   color: #9ca3af;
@@ -396,6 +400,7 @@ onMounted(() => {
   cursor: pointer;
 }
 .session-add:hover { border-color: #77a9e4; background: #f4f8fd; }
+.session-add:disabled { opacity: .55; cursor: wait; }
 
 .starter-panel {
   flex: 1;
