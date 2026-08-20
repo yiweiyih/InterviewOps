@@ -59,10 +59,15 @@ export const useTodoStore = defineStore('todo', () => {
   async function toggleAllTodos() {
     const newState = !isAllCompleted.value
     const toToggle = todos.value.filter(t => t.completed !== newState)
-    await Promise.all(toToggle.map(t =>
-      fetch(apiUrl(`/api/todos/${t.id}/toggle`), { method: 'PATCH', headers: authHeaders() })
-    ))
+    const results = await Promise.allSettled(toToggle.map(async (todo) => {
+      const response = await fetch(apiUrl(`/api/todos/${todo.id}/toggle`), {
+        method: 'PATCH',
+        headers: authHeaders()
+      })
+      if (!response.ok) throw new Error(`任务 ${todo.id} 状态更新失败`)
+    }))
     await fetchTodos()
+    if (results.some(result => result.status === 'rejected')) throw new Error('部分任务状态更新失败')
   }
 
   function toggleTodoSelection(id) {
@@ -82,11 +87,13 @@ export const useTodoStore = defineStore('todo', () => {
   }
 
   async function batchDeleteTodos() {
-    await Promise.all([...selectedTodoIds.value].map(id =>
-      fetch(apiUrl(`/api/todos/${id}`), { method: 'DELETE', headers: authHeaders() })
-    ))
+    const results = await Promise.allSettled([...selectedTodoIds.value].map(async (id) => {
+      const response = await fetch(apiUrl(`/api/todos/${id}`), { method: 'DELETE', headers: authHeaders() })
+      if (!response.ok) throw new Error(`任务 ${id} 删除失败`)
+    }))
     selectedTodoIds.value.clear()
     await fetchTodos()
+    if (results.some(result => result.status === 'rejected')) throw new Error('部分任务删除失败')
   }
 
   return {
