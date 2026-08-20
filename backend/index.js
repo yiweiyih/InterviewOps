@@ -581,9 +581,9 @@ async function handleWithFunctionCalling(messages, res, userId) {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
   }
-  function writeToolCall(name, status, input, result) {
+  function writeToolCall(callId, name, status, input, result) {
     ensureSseHeaders();
-    const payload = `event: tool_call\ndata: ${JSON.stringify({ name, status, input, result })}\n\n`;
+    const payload = `event: tool_call\ndata: ${JSON.stringify({ callId, name, status, input, result })}\n\n`;
     console.log(`[SSE] writeToolCall ${name} ${status}`);
     res.write(payload);
   }
@@ -637,7 +637,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
               if (!userId) throw new Error(`工具 ${toolName} 需要登录用户`);
               toolArgs.userId = userId;
             }
-            writeToolCall(toolName, 'running', inputSummary, null);
+            writeToolCall(toolCall.id, toolName, 'running', inputSummary, null);
 
             let result;
             if (definition.transport === 'local') {
@@ -667,6 +667,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
               if (name === 'delete_todo') return '已删除';
               if (name === 'toggle_todo') return `已${toolResult.todo?.completed ? '完成' : '取消完成'}`;
               if (name === 'get_todos') return `共 ${toolResult.todos?.length ?? 0} 条待办`;
+              if (name === 'retrieve_knowledge') return `匹配 ${Array.isArray(toolResult) ? toolResult.length : 0} 条资料片段`;
               if (name === 'search_web') return toolResult.summary || toolResult.results?.[0]?.title || '搜索完成';
               if (name === 'write_note') return `已保存笔记：${toolResult.title || ''}`;
               if (name === 'read_notes') return `共 ${toolResult.notes?.length ?? 0} 条笔记`;
@@ -674,7 +675,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
             }
 
             const resultSummary = buildResultSummary(toolName, result);
-            writeToolCall(toolName, 'done', inputSummary, resultSummary);
+            writeToolCall(toolCall.id, toolName, 'done', inputSummary, resultSummary);
             recordTool({ tool: toolName, status: 'success', durationMs: performance.now() - toolStartedAt });
             console.log(`[Agent] 工具 ${toolName} 执行成功`);
             return { tool_call_id: toolCall.id, content: JSON.stringify(result) };
@@ -692,7 +693,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
           return settled.value;
         } else {
           console.warn(`[Agent] 工具 ${toolName} 失败:`, settled.reason?.message);
-          writeToolCall(toolName, 'error', getToolInputSummary(toolCalls[i]), settled.reason?.message || '执行失败');
+          writeToolCall(toolCalls[i].id, toolName, 'error', getToolInputSummary(toolCalls[i]), settled.reason?.message || '执行失败');
           return {
             tool_call_id: toolCalls[i].id,
             content: JSON.stringify({ error: `工具 ${toolName} 执行失败: ${settled.reason?.message}` })
