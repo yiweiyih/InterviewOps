@@ -1,7 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, nextTick, computed, defineAsyncComponent } from 'vue'
 import { ChatDotRound, Close } from '@element-plus/icons-vue'
-import VirtualList from '../components/VirtualList.vue'
 
 const MarkdownRenderer = defineAsyncComponent(() =>
   import('../components/MarkdownRenderer.vue')
@@ -23,6 +22,7 @@ const messages = computed(() => {
 const inputMessage = ref('')
 const scroller = ref(null)
 const isGenerating = ref(false)
+const shouldStickToBottom = ref(true)
 const sessionList = computed(() => Array.from(chatStore.sessions.values()))
 const showStarter = computed(() => {
   return messages.value.length === 1 && messages.value[0]?.role === 'assistant'
@@ -33,6 +33,19 @@ const starterPrompts = [
   { label: '表达诊断', title: '把项目介绍改成证据化表达', query: '请基于我的简历，帮我诊断项目介绍是否说清楚了问题、方案、取舍、个人贡献和结果，并标注引用来源。' },
   { label: '行动计划', title: '把薄弱点拆成一周提升计划', query: '根据我的面试目标，把本周的准备拆成具体、可验收的行动，并添加到提升计划。' }
 ]
+
+const toolLabels = {
+  retrieve_knowledge: '检索面试资料',
+  get_todos: '读取提升计划',
+  add_todo: '添加提升任务',
+  delete_todo: '删除提升任务',
+  toggle_todo: '更新任务状态',
+  search_web: '检索实时信息',
+  get_datetime: '读取当前时间',
+  get_weather: '查询天气',
+  write_note: '保存复盘笔记',
+  read_notes: '读取复盘笔记'
+}
 
 let abortController = null
 let saveTimer = null
@@ -83,16 +96,52 @@ const handleDeleteSession = async (id) => {
 }
 
 const scrollToBottom = () => {
-  if (scroller.value) scroller.value.scrollToBottom()
+  if (!scroller.value) return
+  scroller.value.scrollTop = scroller.value.scrollHeight
+  shouldStickToBottom.value = true
 }
 
-// 监听消息内容变化，DOM 更新后自动滚到底部
+const handleMessagesScroll = (event) => {
+  const element = event.currentTarget
+  const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+  shouldStickToBottom.value = distanceToBottom < 80
+}
+
+const followLatestMessage = () => {
+  if (shouldStickToBottom.value) nextTick(scrollToBottom)
+}
+
+const hasRunningTools = (toolCalls = []) => toolCalls.some(toolCall => toolCall.status === 'running')
+
+const shouldRenderMessage = (message) => {
+  if (message.type === 'tool_call') return false
+  if (message.role === 'user') return Boolean(message.content)
+  if (message.role === 'assistant') {
+    return Boolean(message.content || message.toolCalls?.length || message.status === 'interrupted')
+  }
+  return false
+}
+
+const toolTraceTitle = (toolCalls = []) => {
+  if (hasRunningTools(toolCalls)) return '正在调用备战能力'
+  return `已完成 ${toolCalls.length} 项资料与行动检查`
+}
+
+const toolResultText = (toolCall) => {
+  if (!toolCall.result) return ''
+  if (toolCall.name === 'retrieve_knowledge' && String(toolCall.result).trim().startsWith('[')) {
+    return '已匹配相关资料片段'
+  }
+  return toolCall.result
+}
+
+// 只有用户仍停留在底部时才跟随流式内容，避免上滚阅读被强制拉回。
 watch(
   () => {
     const msgs = chatStore.currentSession?.messages
     return msgs?.[msgs.length - 1]?.content
   },
-  () => scrollToBottom(),
+  followLatestMessage,
   { flush: 'post' }
 )
 
@@ -142,8 +191,15 @@ const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false
       apiMessages,
       onChunk,
       abortController.signal,
-      citations => { aiReply.citations = citations },
-      data => chatStore.upsertToolCall(data, sessionId)
+      citations => {
+        aiReply.citations = citations
+        followLatestMessage()
+      },
+      data => {
+        chatStore.upsertToolCall(data, sessionId, aiReply.id)
+        throttledSave()
+        followLatestMessage()
+      }
     )
     aiReply.status = 'done'
   } catch (err) {
@@ -160,7 +216,7 @@ const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false
     chatStore.saveToStorage()
     abortController = null
     isGenerating.value = false
-    scrollToBottom()
+    followLatestMessage()
     if (refreshTodos) await todoStore.fetchTodos().catch(() => {})
   }
 }
@@ -171,6 +227,8 @@ const sendMessage = async () => {
 
   chatStore.addUserMessage(inputMessage.value.trim())
   inputMessage.value = ''
+  shouldStickToBottom.value = true
+  nextTick(scrollToBottom)
 
   await runGeneration(
     buildApiMessages(messages.value),
@@ -235,26 +293,37 @@ onMounted(() => {
       </div>
     </section>
 
-    <VirtualList
+    <div
       v-else
       ref="scroller"
       class="chat-messages"
-      :items="messages"
-      :estimated-item-height="80"
+      @scroll.passive="handleMessagesScroll"
     >
-      <template #default="{ item }">
-        <div :class="['message-item', item.type === 'tool_call' ? 'tool-call-item' : item.role === 'assistant' ? 'ai-message' : 'user-message']">
-            <!-- 工具调用气泡 -->
-            <div v-if="item.type === 'tool_call'" class="tool-call-bubble">
-              <span class="tool-icon">🔧</span>
-              <span class="tool-name">{{ item.name }}</span>
-              <span v-if="item.input" class="tool-input">{{ item.input }}</span>
-              <span :class="['tool-status', item.status]">
-                {{ item.status === 'running' ? '执行中...' : item.status === 'error' ? '失败' : '完成' }}
-              </span>
-              <span v-if="item.result && item.status !== 'running'" class="tool-result">{{ item.result }}</span>
-            </div>
-            <Suspense v-else-if="item.role === 'assistant'">
+      <div class="message-list">
+        <div v-for="item in messages" v-show="shouldRenderMessage(item)" :key="item.id" :class="['message-item', item.role === 'assistant' ? 'ai-message' : 'user-message']">
+          <div v-if="item.role === 'assistant'" class="assistant-turn">
+            <details v-if="item.toolCalls?.length" class="tool-trace" :open="hasRunningTools(item.toolCalls)">
+              <summary>
+                <span class="tool-trace-icon">✦</span>
+                <span class="tool-trace-title">{{ toolTraceTitle(item.toolCalls) }}</span>
+                <span :class="['tool-trace-status', hasRunningTools(item.toolCalls) ? 'running' : 'done']">
+                  {{ hasRunningTools(item.toolCalls) ? '执行中' : '已完成' }}
+                </span>
+              </summary>
+              <div class="tool-trace-list">
+                <div v-for="toolCall in item.toolCalls" :key="toolCall.id" class="tool-trace-row">
+                  <span :class="['tool-step-dot', toolCall.status]"></span>
+                  <div>
+                    <strong>{{ toolLabels[toolCall.name] || toolCall.name }}</strong>
+                    <small v-if="toolCall.input">{{ toolCall.input }}</small>
+                    <small v-if="toolResultText(toolCall) && toolCall.status !== 'running'" class="tool-step-result">
+                      {{ toolResultText(toolCall) }}
+                    </small>
+                  </div>
+                </div>
+              </div>
+            </details>
+            <Suspense v-if="item.content">
               <template #default>
                 <MarkdownRenderer :content="item.content" class="message-content" />
               </template>
@@ -262,12 +331,10 @@ onMounted(() => {
                 <div class="message-content message-loading">加载中...</div>
               </template>
             </Suspense>
-            <!-- 中断提示 -->
             <div v-if="item.role === 'assistant' && item.status === 'interrupted' && !isGenerating" class="regenerate-bar">
               <span class="interrupted-tip">生成被中断</span>
               <el-button size="small" type="primary" plain @click="handleRegenerate(item.id)">重新生成</el-button>
             </div>
-            <!-- 引用来源卡片 -->
             <div v-if="item.citations && item.citations.length" class="citations">
               <div class="citations-title">引用来源</div>
               <div v-for="(c, i) in item.citations" :key="i" class="citation-item">
@@ -278,10 +345,11 @@ onMounted(() => {
                 <div class="citation-text">{{ c.text }}</div>
               </div>
             </div>
-            <div class="message-content" v-else-if="item.role !== 'assistant'">{{ item.content }}</div>
+          </div>
+          <div v-else class="message-content">{{ item.content }}</div>
         </div>
-      </template>
-    </VirtualList>
+      </div>
+    </div>
 
     <div v-if="isGenerating" class="typing-bar">
       <div class="typing-indicator">
@@ -427,8 +495,16 @@ onMounted(() => {
 .chat-messages {
   flex: 1;
   min-height: 0;
-  position: relative;
+  overflow-y: auto;
   background: transparent;
+}
+
+.message-list {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 4px 0;
 }
 
 .message-item {
@@ -450,6 +526,10 @@ onMounted(() => {
 .ai-message { justify-content: flex-start; }
 .user-message { justify-content: flex-end; }
 
+.assistant-turn {
+  width: min(78%, 780px);
+}
+
 .message-content {
   max-width: 78%;
   padding: 14px 18px;
@@ -460,6 +540,7 @@ onMounted(() => {
 }
 
 .ai-message .message-content {
+  max-width: none;
   background-color: #fff;
   border: 1px solid #e8e8e8;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -607,44 +688,59 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.tool-call-item {
-  justify-content: flex-start;
+.tool-trace {
+  margin-bottom: 8px;
+  border: 1px solid #dbe6ef;
+  border-radius: 11px;
+  background: rgba(248, 251, 254, .96);
+  color: #536477;
 }
 
-.tool-call-bubble {
-  display: inline-flex;
+.tool-trace summary {
+  display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 14px;
-  background-color: #f0f9ff;
-  border: 1px solid #bae6fd;
-  border-radius: 12px;
-  font-size: 13px;
-  color: #0369a1;
-  max-width: 70%;
-}
-
-.tool-icon { font-size: 14px; }
-.tool-name { font-weight: 600; }
-.tool-input { color: #64748b; }
-
-.tool-status.running {
-  color: #d97706;
-  animation: pulse 1.2s infinite;
-}
-.tool-status.done { color: #16a34a; }
-.tool-status.error { color: #dc2626; }
-
-.tool-result {
-  width: 100%;
-  color: #374151;
+  gap: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
   font-size: 12px;
-  border-top: 1px solid #bae6fd;
-  padding-top: 4px;
-  margin-top: 2px;
-  word-break: break-all;
 }
+
+.tool-trace summary::-webkit-details-marker { display: none; }
+.tool-trace-icon { color: #397fc2; }
+.tool-trace-title { color: #34465a; font-weight: 600; }
+.tool-trace-status { margin-left: auto; font-size: 11px; }
+.tool-trace-status.running { color: #c47a12; }
+.tool-trace-status.done { color: #25815a; }
+
+.tool-trace-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 12px;
+  padding: 10px 0 11px;
+  border-top: 1px solid #e5edf4;
+}
+
+.tool-trace-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.tool-step-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #96a6b5;
+}
+.tool-step-dot.running { background: #e0a13c; animation: pulse 1.2s infinite; }
+.tool-step-dot.done { background: #35a476; }
+.tool-step-dot.error { background: #dc6262; }
+.tool-trace-row strong { display: block; color: #405369; font-size: 12px; }
+.tool-trace-row small { display: block; overflow: hidden; margin-top: 2px; color: #7d8b9a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-trace-row .tool-step-result { color: #52677c; }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -676,7 +772,8 @@ onMounted(() => {
   .prompt-card { min-height: 105px; }
   .governance-line { flex-wrap: wrap; }
   .starter-panel { justify-content: flex-start; overflow-y: auto; }
-  .message-content, .tool-call-bubble { max-width: 90%; }
+  .message-content { max-width: 90%; }
+  .assistant-turn { width: 90%; }
   .composer-footer > span { display: none; }
   .composer-footer { justify-content: flex-end; }
 }
