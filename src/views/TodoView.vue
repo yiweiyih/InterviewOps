@@ -166,6 +166,7 @@ async function confirmBatchDelete() {
 .empty-state strong { color: #4b5b6d; }
 .empty-state p { margin-top: 6px; font-size: 12px; }
 .task-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 16px; color: #7b8795; font-size: 12px; }
+@media (min-width: 1181px) { .task-hero p { max-width: none; white-space: nowrap; } }
 @media (max-width: 920px) { .task-hero { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 680px) { .task-page { padding: 16px; } .task-hero { padding: 24px; } .task-metrics { width: 100%; justify-content: center; } .add-row { flex-direction: column; } .panel-heading, .task-footer { align-items: flex-start; flex-direction: column; } }
 </style>

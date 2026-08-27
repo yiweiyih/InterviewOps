@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
     <section v-if="!session" class="setup-layout">
       <div class="setup-copy">
         <div class="ready-pill"><span></span> INTERVIEW ROOM READY</div>
-        <h1>不是随机问答，而是沿着你的经历连续追问。</h1>
+        <h1>不是随机问答，而是沿着你的经历连续追问</h1>
         <p>系统会读取目标画像、JD 与资料索引，像真实面试官一样根据上一题的证据缺口生成下一题。</p>
         <div class="principles"><span><b>01</b> 资料驱动</span><i></i><span><b>02</b> 动态追问</span><i></i><span><b>03</b> 证据评分</span></div>
       </div>
