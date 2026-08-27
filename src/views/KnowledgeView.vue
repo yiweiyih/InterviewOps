@@ -205,5 +205,6 @@ onMounted(loadDocuments)
 .empty-state span { margin-top: 4px; font-size: 11px; }
 .privacy-note { display: flex; align-items: center; gap: 6px; margin-top: 13px; padding: 10px 12px; border-radius: 8px; color: #64778a; background: #f4f7fa; font-size: 11px; }
 @media (max-width: 940px) { .knowledge-hero { align-items: flex-start; flex-direction: column; } .workspace-grid { grid-template-columns: 1fr; } }
+@media (min-width: 1181px) { .hero-copy > p { max-width: none; white-space: nowrap; } }
 @media (max-width: 680px) { .knowledge-page { padding: 16px; } .knowledge-hero { padding: 24px; } .knowledge-stats { width: 100%; justify-content: center; } }
 </style>

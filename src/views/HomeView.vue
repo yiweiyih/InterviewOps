@@ -60,8 +60,8 @@ onMounted(loadDashboard)
     <section class="hero">
       <div class="hero-copy">
         <div class="hero-status"><span></span> PERSONAL INTERVIEW WORKSPACE</div>
-        <h1>把每一次练习，变成下一次面试的证据。</h1>
-        <p>基于你的简历、目标 JD 和项目经历进行连续追问；每道回答都有证据化反馈，并自动沉淀成可执行的提升计划。</p>
+        <h1>让每次练习，都成为下一次提升的依据</h1>
+        <p>基于你的简历、目标 JD 和项目经历持续追问；每次练习后沉淀优势、能力缺口和改进建议，并生成下一轮训练重点。</p>
         <div class="hero-actions">
           <el-button type="primary" size="large" :icon="Microphone" @click="router.push('/interview')">开始模拟面试</el-button>
           <el-button size="large" :icon="Document" @click="router.push('/materials')">完善面试资料</el-button>
@@ -161,7 +161,7 @@ onMounted(loadDashboard)
 .hero-copy, .target-card { position: relative; z-index: 1; }
 .hero-status { display: flex; align-items: center; gap: 8px; color: #aaa6e8; font-size: 9px; font-weight: 700; letter-spacing: .17em; }
 .hero-status span { width: 7px; height: 7px; border-radius: 50%; background: #38d5ae; box-shadow: 0 0 0 5px rgba(56,213,174,.11); }
-.hero h1 { max-width: 720px; margin: 14px 0 12px; font-size: clamp(30px,3.7vw,47px); line-height: 1.12; letter-spacing: -.035em; }
+.hero h1 { margin: 14px 0 12px; font-size: clamp(30px,3.2vw,47px); line-height: 1.12; letter-spacing: -.035em; white-space: nowrap; }
 .hero-copy > p { max-width: 700px; color: #c0c0da; font-size: 14px; line-height: 1.8; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
 .hero-actions .el-button + .el-button { margin-left: 0; }
@@ -199,6 +199,8 @@ onMounted(loadDashboard)
 .session-list strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.session-list p { margin-top: 3px; color: #9497a9; font-size: 9px; }
 .recent-empty { display: flex; min-height: 178px; flex-direction: column; align-items: center; justify-content: center; color: #8a8da0; text-align: center; }.recent-empty > span { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: #6157e8; background: #efedff; font-size: 20px; }.recent-empty strong { margin-top: 10px; color: #515469; font-size: 12px; }.recent-empty p { margin: 4px 0 11px; font-size: 10px; }
 @media (max-width: 1180px) { .metrics-grid { grid-template-columns: repeat(2,1fr); }.workspace-grid { grid-template-columns: 1fr; } }
+@media (min-width: 1181px) { .hero-copy > p { max-width: none; white-space: nowrap; } }
+@media (max-width: 1000px) { .hero h1 { white-space: normal; } }
 @media (max-width: 820px) { .hero { grid-template-columns: 1fr; }.prep-flow { grid-template-columns: repeat(2,1fr); } }
 @media (max-width: 560px) { .hero { padding: 28px 24px; }.metrics-grid { grid-template-columns: 1fr; }.prep-flow { grid-template-columns: 1fr; }.hero-actions { flex-direction: column; }.hero-actions .el-button { width: 100%; } }
 </style>
