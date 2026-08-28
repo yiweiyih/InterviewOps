@@ -1,89 +1,122 @@
 # InterviewOps
 
-一个面向技术校招与社招准备的面试训练系统：把候选人的简历、目标 JD 和项目资料变成针对性问题，通过动态追问、证据化评分和复盘档案形成持续改进闭环。
+面向技术求职者的 AI 面试训练与复盘系统。它会读取候选人的目标岗位、JD、简历与项目资料，生成针对性问题，并根据回答中的真实证据持续追问、评分和沉淀复盘。
 
-> Vue 3 · Node.js · DeepSeek · MCP · User-scoped RAG · SSE · Evaluation
+> Vue 3 · Node.js · DeepSeek Function Calling · MCP · User-scoped RAG · SSE
 
-## 为什么做这个项目
+## 项目概览
 
-大多数模拟面试产品停留在“模型随机出题、回答后给一句建议”。InterviewOps 重点解决三个更真实的问题：
+InterviewOps 解决的不是“让大模型随机出几道面试题”，而是面试准备中的三个连续问题：
 
-| 用户问题 | 产品方案 |
+| 问题 | InterviewOps 的处理方式 |
 | --- | --- |
-| 题目和候选人的经历、目标岗位无关 | 用候选人画像、目标 JD 和私有资料约束问题生成 |
-| 反馈泛泛，甚至替候选人编造经历 | 评分只引用回答中出现的证据，缺失信息单独标注 |
-| 练习结束后没有形成长期提升 | 聚合能力维度、保留逐题证据链，并沉淀成提升计划 |
+| 练习内容与目标岗位脱节 | 使用候选人画像、目标 JD 和私有资料约束问题生成 |
+| 反馈泛化，无法核验 | 只依据回答中出现的事实评分，分别展示证据、缺失点和改进结构 |
+| 多次练习彼此割裂 | 聚合能力维度与逐题反馈，生成复盘档案和下一轮提升计划 |
 
-它不是在线面试代答工具。产品边界明确限定为面试前训练和面试后复盘。
+产品边界限定为**面试前训练与面试后复盘**，不提供真实面试中的实时代答。
 
-## 核心体验
-
-1. **目标与画像**：设置目标岗位、公司、面试日期、个人优势和重点训练方向。
-2. **面试资料**：上传 DOCX、PDF、Markdown、TXT 或 JSON 格式的简历、JD、项目和面试记录。
-3. **模拟面试**：选择综合模拟、项目深挖、岗位专项或行为面试；具体技术方向由目标岗位、JD 与自定义重点领域决定，支持 2—8 题和三档难度。
-4. **动态追问**：下一题会结合上一题的缺口生成，不是预先写死的问题列表。
-5. **逐题反馈**：输出回答中的有效证据、薄弱点、1—5 分维度评分和更好的表达结构。
-6. **复盘档案**：生成 100 分综合表现、优势/短板、下一步动作，并保留原问题与原回答。
-7. **备战教练**：基于私有资料做项目追问、表达诊断、公司调研，并可写入提升计划。
-
-## 系统架构
+## 训练闭环
 
 ```mermaid
 flowchart LR
-    U["Vue 3 Interview Workspace"] -->|"JWT / JSON / SSE"| A["Node.js API"]
-    A --> I["Interview Service"]
-    I --> P["Question Generator"]
-    I --> S["Evidence-based Scoring"]
-    I --> R["Review Aggregator"]
-    P --> L["DeepSeek"]
-    S --> L
-    P --> K["User-scoped RAG"]
-    K --> E["BGE-M3 Embeddings"]
-    A --> G["Agent Tool Governance"]
-    G -->|"JSON-RPC"| M["MCP Tool Service"]
-    A --> O["Metrics & Evaluations"]
+    A["目标岗位与候选人画像"] --> B["简历、JD 与项目资料"]
+    B --> C["生成针对性问题"]
+    C --> D["作答与动态追问"]
+    D --> E["证据化评分"]
+    E --> F["复盘与提升计划"]
+    F --> C
 ```
 
-领域代码按职责拆分：
+用户可以完成以下流程：
 
-- `interview/store.js`：用户隔离、原子写入、会话持久化
-- `interview/rubric.js`：评分维度、模型输出归一化、确定性报告聚合
-- `interview/service.js`：问题生成、回答评估、动态追问与会话状态机
-- `interview/routes.js`：HTTP 路由与错误边界
-- `documents/extract-text.js`：DOCX/PDF/文本的安全纯文本解析
+1. 设置目标方向、目标公司、岗位 JD、个人优势和重点训练领域。
+2. 上传 DOCX、PDF、Markdown、TXT 或 JSON 格式的简历与项目资料。
+3. 选择综合模拟、项目深挖、岗位专项或行为面试，以及难度和题目数量。
+4. 系统根据资料生成第一题，并结合上一轮回答的证据缺口动态追问。
+5. 每题输出能力维度评分、有效证据、薄弱点和更好的回答结构。
+6. 训练结束后生成综合表现、优势短板和下一步行动，并保留完整问答记录。
 
-通用 Agent 能力没有被删除，而是作为底层能力继续服务于实时搜索、资料检索、笔记与提升计划。
+## 核心设计
 
-## 值得讲的工程设计
+### 1. 面试领域状态机
 
-### 1. 评分是结构化合同，不是自由文本
+面试过程被建模为“创建会话—生成问题—提交回答—结构化评分—生成下一题—完成复盘”。问题生成同时参考目标方向、JD、重点训练领域、RAG 召回资料和历史问答，并通过相似度检测减少重复问题。
 
-模型必须返回固定 JSON；服务端按照面试模式选择评分维度，将分数限制在 1—5，并对字段、数组长度和空值进行归一化。最终报告由服务端确定性聚合，避免让模型随意计算总分。
+### 2. 证据化评分合同
 
-### 2. 反馈坚持证据边界
+模型按固定 JSON 结构返回分数、证据、优势、缺失点和改进结构。服务端负责字段归一化、分数边界约束与最终报告聚合，避免模型自由发挥总分，也不会替候选人补写不存在的经历或指标。
 
-评估 Prompt 明确区分“回答中已有的事实”和“建议补充的信息”。前端同时展示原始回答、引用证据、缺失点与建议结构，面试官可以沿着完整证据链检查评分是否合理。
+### 3. 用户级 RAG 知识库
 
-### 3. 用户数据隔离由服务端保证
+资料上传后完成文本提取、重叠分块和 `BAAI/bge-m3` 向量化，通过余弦相似度进行 Top-K 召回。检索范围由服务端可信身份限定，回答携带资料来源和相关片段，上传原文件在解析后删除。
 
-JWT 在 API 端解析，模型不能提供或覆盖 `userId`。候选人画像、模拟记录、待办、笔记、RAG 与长期记忆均按服务端可信身份隔离；写入采用临时文件 + rename。
+### 4. Agent 任务编排
 
-### 4. RAG 支持真实求职资料
+基于 DeepSeek Function Calling 实现最多 5 轮的 Agent Loop，统一接入知识检索、网络搜索、待办、笔记等 10 项工具：
 
-DOCX 使用 Mammoth 提取纯文本，PDF 使用 pdf-parse；文档按重叠窗口分块并写入资料类型、来源和用户归属。召回结果携带来源与相关度，不直接渲染不可信文档 HTML。
+- Planner 将复杂请求拆成带依赖关系的任务，并通过拓扑排序确定执行顺序；
+- 同一轮的多个工具调用使用 `Promise.allSettled` 并行执行，单个工具失败不会中断其他结果；
+- Tool Catalog 统一维护参数 Schema、调用方式、用户作用域和超时时间；
+- 用户身份由服务端注入，模型不能传入或覆盖 `userId`。
 
-### 5. 通用 Agent 仍有治理和可观测性
+### 5. 流式交互与工程质量
 
-10 个工具由统一 catalog 声明 schema、scope、transport 和 timeout；参数白名单、身份注入、超时降级、SSE 工具状态、Prometheus 指标和 24 条路由评测集保持可用。
+回答文本、资料引用和工具执行状态通过 SSE 分事件传输，前端统一解析并支持中止与自动恢复。仓库包含面试领域、RAG、工具治理和流式解析测试，同时使用 GitHub Actions 执行测试、构建、评测集校验与依赖审计。
+
+## 技术架构
+
+```mermaid
+flowchart LR
+    UI["Vue 3 / Pinia"] -->|"JWT · JSON · SSE"| API["Node.js API"]
+    API --> INTERVIEW["Interview Service"]
+    API --> AGENT["Agent Loop / Planner"]
+    API --> RAG["User-scoped RAG"]
+    INTERVIEW --> LLM["DeepSeek"]
+    AGENT --> LLM
+    AGENT --> TOOLS["Tool Catalog"]
+    TOOLS --> MCP["MCP Service"]
+    TOOLS --> RAG
+    RAG --> EMBEDDING["BGE-M3 Embedding"]
+```
+
+| 层级 | 技术与职责 |
+| --- | --- |
+| Web | Vue 3、Vite、Pinia、Vue Router、Element Plus |
+| API | Node.js、Express、JWT、面试状态编排与数据隔离 |
+| Agent | DeepSeek Function Calling、Planner、Tool Catalog、MCP |
+| RAG | 文档解析、重叠分块、BGE-M3 Embedding、余弦相似度召回 |
+| 交互 | SSE 文本流、引用事件、工具状态事件、请求中止与恢复 |
+| 质量 | Node Test Runner、评测集、Prometheus、GitHub Actions、Docker Compose |
+
+## 目录结构
+
+```text
+├── src/
+│   ├── views/                 # 工作台、画像、资料、模拟、复盘、计划与教练
+│   ├── stores/                # 登录态、会话与任务状态
+│   └── utils/                 # API、SSE 与面试领域客户端
+├── tests/                     # 前端状态与流式解析测试
+├── backend/
+│   ├── interview/             # 面试状态、评分合同与复盘聚合
+│   ├── documents/             # DOCX、PDF 与文本解析
+│   ├── rag/                   # 用户级向量索引与召回
+│   ├── tools/                 # 工具目录、Schema 与权限约束
+│   ├── observability/         # Prometheus 指标
+│   ├── evals/                 # 工具路由与评分合同评测集
+│   ├── index.js               # API、Planner、Agent Loop 与 SSE
+│   └── mcp-server.js          # MCP 工具服务
+└── docker-compose.yml         # Web、API、MCP 与持久化卷
+```
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js `>=22.12 <25`（仓库包含 `.nvmrc`）
+- Node.js `>=22.12 <25`，仓库已提供 `.nvmrc`
 - DeepSeek API Key
-- SiliconFlow API Key（上传资料并建立 BGE-M3 向量索引时需要）
-- Serper API Key（可选，仅用于实时网络搜索）
+- SiliconFlow API Key，用于 BGE-M3 向量索引
+- Serper API Key，可选，仅用于实时网络搜索
 
 ```bash
 git clone https://github.com/yiweiyih/agentic-rag-assistant.git
@@ -95,7 +128,7 @@ npm ci --prefix backend
 cp backend/.env.example backend/.env
 ```
 
-编辑 `backend/.env`：
+在 `backend/.env` 中填写必要配置：
 
 ```env
 JWT_SECRET=replace-with-at-least-32-random-characters
@@ -105,91 +138,57 @@ SILICONFLOW_API_KEY=your-siliconflow-key
 SERPER_API_KEY=your-serper-key
 ```
 
-一条命令同时启动 Web、API 和 MCP：
+一条命令启动 Web、API 和 MCP：
 
 ```bash
 npm run dev
 ```
 
-打开 `http://localhost:5173`。
+访问 `http://localhost:5173`。API 和 MCP 默认运行在 `3001`、`3002` 端口，Prometheus 指标位于 `http://localhost:3001/metrics`。
 
-| 服务 | 默认地址 |
-| --- | --- |
-| Web | `http://localhost:5173` |
-| API / health | `http://localhost:3001` / `http://localhost:3001/health` |
-| MCP | `http://localhost:3002` |
-| Prometheus metrics | `http://localhost:3001/metrics` |
-
-## 质量验证
+## 验证
 
 ```bash
-# 前端测试、生产构建、后端语法检查与单元测试
+# 前端测试与构建、后端语法检查与单元测试
 npm run check
 
-# 面试评分合同回归（不产生模型费用）
+# 面试评分合同回归
 npm run eval:interview
 
-# 工具路由数据集/schema 检查（不产生模型费用）
+# 工具路由数据集与 Schema 校验
 npm run eval:tools:dry
 
 # 调用真实模型运行工具路由评测
 npm run eval:tools
 ```
 
-CI 在 push 和 PR 时执行测试、构建、评测集 dry-run 与高危依赖审计。
+## 部署与数据边界
 
-## 主要接口
+项目提供 Docker Compose，可在单机环境启动 Web、API 与 MCP。`DATA_DIR` 用于统一管理用户账号、面试记录、RAG 索引、长期记忆、待办和笔记；Compose 默认将 `/data` 挂载到命名卷，容器重建不会清空数据。
+
+当前持久化方案采用本地 JSON 与向量文件，适合个人使用、作品集演示和单实例部署。正式多实例环境应迁移到 PostgreSQL 与 pgvector/Milvus，并补充对象存储、分布式限流和链路追踪。
+
+<details>
+<summary>主要 API</summary>
 
 | Method | Path | 作用 |
 | --- | --- | --- |
 | `GET/PUT` | `/api/interview/workspace` | 读取或更新候选人画像与目标岗位 |
-| `GET/POST` | `/api/interview/sessions` | 查询训练记录或开始模拟面试 |
+| `GET/POST` | `/api/interview/sessions` | 查询训练记录或创建模拟面试 |
 | `POST` | `/api/interview/sessions/:id/answer` | 提交回答、评分并生成下一题 |
 | `POST` | `/api/interview/sessions/:id/complete` | 提前结束并生成阶段性报告 |
-| `GET/POST/DELETE` | `/api/knowledge` | 用户级面试资料管理 |
-| `POST` | `/api/chat` | 备战教练 Agent Loop + SSE |
-| `GET/POST/PATCH/DELETE` | `/api/todos` | 提升计划管理 |
-| `GET` | `/api/dashboard` | 用户备战摘要与低基数运行数据 |
+| `GET` | `/api/knowledge` | 查询用户级面试资料 |
+| `POST` | `/api/knowledge/upload` | 上传并索引面试资料 |
+| `DELETE` | `/api/knowledge/:source` | 删除资料及其索引片段 |
+| `POST` | `/api/chat` | 备战教练 Agent Loop 与 SSE |
+| `GET/POST/PATCH/DELETE` | `/api/todos` | 管理提升计划 |
+| `GET` | `/api/dashboard` | 获取备战摘要 |
 
-## 目录结构
+</details>
 
-```text
-├── src/
-│   ├── views/                   # 工作台、画像、资料、模拟、复盘、计划、教练
-│   ├── stores/                  # 鉴权、会话与任务状态
-│   └── utils/                   # API、SSE 与面试领域客户端
-├── tests/                       # SSE 增量解析测试
-├── backend/
-│   ├── index.js                 # API、鉴权、Agent Loop、SSE
-│   ├── interview/               # 面试领域模型与编排
-│   ├── documents/               # DOCX/PDF/文本解析
-│   ├── rag/                     # 用户级向量索引与召回
-│   ├── tools/                   # 工具治理目录
-│   ├── observability/           # Prometheus 指标
-│   ├── evals/                   # 路由与评分合同回归集
-│   └── test/                    # 后端单元测试
-└── docker-compose.yml           # Web + API + MCP
-```
+## 延伸阅读
 
-## 当前边界
+- [面试讲解与追问准备](docs/INTERVIEW_GUIDE.md)
+- [CI 工作流](.github/workflows/ci.yml)
 
-当前版本适合个人使用、作品集演示和系统设计讨论，持久化仍使用本地 JSON/向量文件。生产化应迁移到 PostgreSQL + pgvector/Milvus，引入 Redis 队列、限流、分布式 trace、对象存储和更完整的权限模型。
-
-### 运行数据与部署
-
-未设置 `DATA_DIR` 时，运行数据分散保存在 `backend/` 下的已忽略文件中；设置后会统一写入该目录。Docker Compose 已设置 `DATA_DIR=/data`，并将 API 与 MCP 的 `/data` 挂载到命名卷 `agent-data`，因此容器重建不会清空数据。迁移或备份部署时需要同时备份这个卷。
-
-| 数据 | `DATA_DIR` 下的位置 | 说明 |
-| --- | --- | --- |
-| 用户账号 | `users.json` | 密码只保存 bcrypt 哈希 |
-| 画像与面试记录 | `interview-data/<user-hash>.json` | 每个用户独立文件，文件名不暴露用户 ID |
-| 文档索引 | `knowledge-store.json` | 保存解析后的文本片段、向量、来源和用户归属；上传的原始文件解析后即删除 |
-| 长期记忆 | `memory-store.json` | 按用户 ID 过滤 |
-| 提升计划与笔记 | `todos-<userId>.json`、`notes-<userId>.json` | 由 MCP 服务读写 |
-| 上传临时文件 | `uploads/` | 只在解析期间存在，不是持久化原文档 |
-
-不要把当前后端直接部署到无持久磁盘的 Serverless 环境，否则实例重启后数据会丢失。作品集演示可使用单机 Docker Compose 或带持久磁盘的单实例容器；需要多实例或正式运营时，再将账号、会话与索引迁移到数据库和对象存储。
-
-评分用于训练反馈，不代表真实公司的录用标准；不要在简历里填写尚未真实测量的准确率、延迟或业务指标。
-
-详细演示话术见 [docs/INTERVIEW_GUIDE.md](docs/INTERVIEW_GUIDE.md)。
+> 评分仅用于训练反馈，不代表任何公司的真实录用标准。
