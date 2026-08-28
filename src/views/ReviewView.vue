@@ -50,7 +50,7 @@ onMounted(loadSessions)
 <template>
   <div class="io-page review-page" v-loading="loading">
     <section class="review-hero">
-      <div><span class="io-eyebrow">REVIEW ARCHIVE</span><h1>复盘不是一句“答得不好”，而是可追踪的能力变化。</h1><p>保留每道问题、原始回答、评分证据和改进结构，让下一轮训练知道该追问哪里。</p></div>
+      <div><span class="io-eyebrow">REVIEW ARCHIVE</span><h1>复盘不是一句“答得不好”，而是可追踪的能力变化</h1><p>保留每道问题、原始回答、评分证据和改进结构，让下一轮训练知道该追问哪里。</p></div>
       <div class="archive-stats"><div><strong>{{ completedCount }}</strong><span>已复盘场次</span></div><i></i><div><strong>{{ averageScore || '—' }}</strong><span>平均表现</span></div></div>
     </section>
 
