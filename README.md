@@ -49,7 +49,7 @@ flowchart LR
 
 ### 3. 用户级 RAG 知识库
 
-资料上传后完成文本提取、重叠分块和 `BAAI/bge-m3` 向量化，通过余弦相似度进行 Top-K 召回。检索范围由服务端可信身份限定，回答携带资料来源和相关片段，上传原文件在解析后删除。
+资料上传后完成文本提取、重叠分块和 `BAAI/bge-m3` 向量化。检索时并行计算向量相似度与 BM25 关键词得分，通过 RRF 融合候选，再使用 `BAAI/bge-reranker-v2-m3` 重排；重排超时或失败时自动降级到融合结果。检索范围由服务端可信身份限定，回答携带资料来源和相关片段，上传原文件在解析后删除。
 
 ### 4. Agent 任务编排
 
@@ -77,7 +77,7 @@ flowchart LR
     AGENT --> TOOLS["Tool Catalog"]
     TOOLS --> MCP["MCP Service"]
     TOOLS --> RAG
-    RAG --> EMBEDDING["BGE-M3 Embedding"]
+    RAG --> RETRIEVAL["BGE-M3 + BM25 + Rerank"]
 ```
 
 | 层级 | 技术与职责 |
@@ -85,7 +85,7 @@ flowchart LR
 | Web | Vue 3、Vite、Pinia、Vue Router、Element Plus |
 | API | Node.js、Express、JWT、面试状态编排与数据隔离 |
 | Agent | DeepSeek Function Calling、Planner、Tool Catalog、MCP |
-| RAG | 文档解析、重叠分块、BGE-M3 Embedding、余弦相似度召回 |
+| RAG | 文档解析、重叠分块、BGE-M3 与 BM25 混合召回、RRF 融合、Rerank |
 | 交互 | SSE 文本流、引用事件、工具状态事件、请求中止与恢复 |
 | 质量 | Node Test Runner、评测集、Prometheus、GitHub Actions、Docker Compose |
 
@@ -115,7 +115,7 @@ flowchart LR
 
 - Node.js `>=22.12 <25`，仓库已提供 `.nvmrc`
 - DeepSeek API Key
-- SiliconFlow API Key，用于 BGE-M3 向量索引
+- SiliconFlow API Key，用于 BGE-M3 向量索引与候选重排
 - Serper API Key，可选，仅用于实时网络搜索
 
 ```bash

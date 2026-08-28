@@ -25,7 +25,11 @@ npm run dev   # terminal 2, :3001
 | `JWT_SECRET` | 是 | 生产环境至少 32 字符 |
 | `DEEPSEEK_API_KEY` | 是 | 对话模型密钥 |
 | `DEEPSEEK_BASE_URL` | 是 | OpenAI-compatible chat completions 地址 |
-| `SILICONFLOW_API_KEY` | 是 | BGE-M3 embedding 密钥 |
+| `SILICONFLOW_API_KEY` | 是 | BGE-M3 embedding 与 reranker 密钥 |
+| `RERANK_MODEL` | 否 | 默认 `BAAI/bge-reranker-v2-m3` |
+| `RERANK_ENABLED` | 否 | 是否启用重排，默认 `true`；失败时自动降级到 Hybrid Search |
+| `RERANK_TIMEOUT_MS` | 否 | 重排请求超时，默认 `8000` ms |
+| `RAG_CANDIDATE_K` | 否 | Hybrid Search 候选数量，默认 `20` |
 | `SERPER_API_KEY` | 否 | 网络搜索工具密钥 |
 | `MCP_SERVER_URL` | 否 | 默认 `http://localhost:3002` |
 | `DATA_DIR` | 否 | 运行数据目录；Docker 使用 `/data` |
