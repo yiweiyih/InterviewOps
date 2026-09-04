@@ -27,3 +27,20 @@ test('joins multiline data and ignores comments', () => {
 
   assert.deepEqual(events, [{ event: 'message', data: 'first\nsecond' }])
 })
+
+test('keeps structured plan progress separate from answer content', () => {
+  const events = []
+  const parser = createSseParser(event => events.push(event))
+
+  parser.feed('event: plan_progress\ndata: {"status":"running","tasks":[{"id":1,"status":"running"}]}\n\n')
+  parser.feed('data: {"content":"最终回答"}\n\n')
+  parser.finish()
+
+  assert.deepEqual(events, [
+    {
+      event: 'plan_progress',
+      data: '{"status":"running","tasks":[{"id":1,"status":"running"}]}'
+    },
+    { event: 'message', data: '{"content":"最终回答"}' }
+  ])
+})

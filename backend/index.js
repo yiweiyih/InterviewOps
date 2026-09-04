@@ -429,7 +429,7 @@ async function planTasks(userMessage) {
 }
 
 // 执行单个子任务，把前置任务结果注入context，复用现有ReAct循环
-async function executeTaskNode(task, results, originalMessages, writeProgress, userId) {
+async function executeTaskNode(task, results, originalMessages, userId) {
   const prevContext = (task.dependsOn || [])
     .map(id => `子任务${id}的结果：${results[id] || '无结果'}`)
     .join('\n');
@@ -443,8 +443,6 @@ async function executeTaskNode(task, results, originalMessages, writeProgress, u
         : `请完成以下子任务：${task.description}`
     }
   ];
-
-  writeProgress(`📋 子任务 ${task.id}：${task.description}`);
 
   // 用现有的 ReAct 循环执行子任务，收集文本结果
   return new Promise((resolve) => {
@@ -482,10 +480,6 @@ async function handleWithPlanning(messages, res, userId) {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
-  const writeProgress = (text) => {
-    res.write(`data: ${JSON.stringify({ content: text + '\n' })}\n\n`);
-  };
-
   const tasks = await planTasks(lastUserMsg);
 
   // 普通对话直接走原有流程
@@ -495,19 +489,37 @@ async function handleWithPlanning(messages, res, userId) {
   }
 
   console.log(`[Planner] 拆解为 ${tasks.length} 个子任务`);
-  writeProgress(`🗂️ 已将任务拆解为 ${tasks.length} 个子任务，开始执行...\n`);
 
   const ordered = topoSort(tasks);
   const results = {};
+  const plan = {
+    status: 'running',
+    tasks: ordered.map(task => ({
+      id: task.id,
+      description: task.description,
+      status: 'pending'
+    }))
+  };
+  const writePlanProgress = () => {
+    if (res.writableEnded || res.destroyed) return;
+    res.write(`event: plan_progress\ndata: ${JSON.stringify(plan)}\n\n`);
+  };
+
+  writePlanProgress();
 
   for (const task of ordered) {
+    const currentTask = plan.tasks.find(item => item.id === task.id);
+    if (currentTask) currentTask.status = 'running';
+    writePlanProgress();
+
     try {
-      results[task.id] = await executeTaskNode(task, results, messages, writeProgress, userId);
-      writeProgress(`✅ 子任务 ${task.id} 完成`);
+      results[task.id] = await executeTaskNode(task, results, messages, userId);
+      if (currentTask) currentTask.status = 'done';
     } catch (e) {
       results[task.id] = `执行失败: ${e.message}`;
-      writeProgress(`❌ 子任务 ${task.id} 失败: ${e.message}`);
+      if (currentTask) currentTask.status = 'error';
     }
+    writePlanProgress();
   }
 
   // 汇总：把所有子任务结果交给模型做最终整合回答
@@ -519,7 +531,8 @@ async function handleWithPlanning(messages, res, userId) {
     }
   ];
 
-  writeProgress('\n📝 正在整合所有结果...\n\n');
+  plan.status = 'summarizing';
+  writePlanProgress();
   // 最终汇总走流式，但SSE头已设置，传true跳过重复设置
   handleStreamRequest(summaryMessages, res, true);
 }

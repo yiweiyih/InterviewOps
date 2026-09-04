@@ -3,9 +3,28 @@ import { defineStore } from 'pinia'
 
 let idSequence = 0
 
+const LEGACY_PLAN_PREFIXES = [
+  '🗂️ 已将任务拆解为',
+  '📋 子任务 ',
+  '✅ 子任务 ',
+  '❌ 子任务 ',
+  '📝 正在整合所有结果'
+]
+
 export function createChatId(prefix) {
   idSequence += 1
   return `${prefix}-${Date.now().toString(36)}-${idSequence.toString(36)}`
+}
+
+export function stripLegacyPlanProgress(content) {
+  if (typeof content !== 'string') return content
+
+  return content
+    .split('\n')
+    .filter(line => !LEGACY_PLAN_PREFIXES.some(prefix => line.trim().startsWith(prefix)))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 function normalizeToolCalls(toolCalls = [], sessionId, messageIndex) {
@@ -50,6 +69,9 @@ export function normalizeSessionMessages(messages = [], sessionId = 'session') {
     normalized.push({
       ...message,
       id,
+      content: message.role === 'assistant'
+        ? stripLegacyPlanProgress(message.content)
+        : message.content,
       ...(message.toolCalls?.length
         ? { toolCalls: normalizeToolCalls(message.toolCalls, sessionId, index) }
         : {})

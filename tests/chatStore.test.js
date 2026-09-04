@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createChatId, normalizeSessionMessages } from '../src/stores/chat.js'
+import { createChatId, normalizeSessionMessages, stripLegacyPlanProgress } from '../src/stores/chat.js'
 
 test('chat ids stay unique for messages created in the same millisecond', () => {
   const ids = Array.from({ length: 5 }, () => createChatId('message'))
@@ -31,4 +31,17 @@ test('legacy standalone tool calls are grouped into their assistant answer', () 
     'retrieve_knowledge',
     'get_todos'
   ])
+})
+
+test('legacy planner logs are removed without changing the final answer', () => {
+  const content = [
+    '🗂️ 已将任务拆解为 2 个子任务，开始执行...',
+    '📋 子任务 1：检索资料',
+    '✅ 子任务 1 完成',
+    '📝 正在整合所有结果...',
+    '',
+    '这是最终回答。'
+  ].join('\n')
+
+  assert.equal(stripLegacyPlanProgress(content), '这是最终回答。')
 })

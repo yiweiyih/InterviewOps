@@ -10,7 +10,7 @@ function calcBackoffDelay(attempt) {
   return Math.min(delay, MAX_DELAY)
 }
 
-export async function streamChat(url, messages, onChunk, signal, onCitations, onToolCall) {
+export async function streamChat(url, messages, onChunk, signal, onCitations, onToolCall, onPlanProgress) {
   let attempt = 0
 
   while (true) {
@@ -57,6 +57,10 @@ export async function streamChat(url, messages, onChunk, signal, onCitations, on
         }
         if (event === 'tool_call') {
           onToolCall?.(json)
+          return
+        }
+        if (event === 'plan_progress') {
+          onPlanProgress?.(json)
           return
         }
         if (json.error) throw new Error(json.error)

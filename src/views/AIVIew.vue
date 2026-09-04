@@ -112,12 +112,39 @@ const followLatestMessage = () => {
 }
 
 const hasRunningTools = (toolCalls = []) => toolCalls.some(toolCall => toolCall.status === 'running')
+const isPlanRunning = (plan) => ['running', 'summarizing'].includes(plan?.status)
+const completedPlanTasks = (plan) => plan?.tasks?.filter(task => ['done', 'error'].includes(task.status)).length || 0
+const failedPlanTasks = (plan) => plan?.tasks?.filter(task => task.status === 'error').length || 0
+
+const planTraceTitle = (plan) => {
+  if (plan.status === 'summarizing') return '正在整理最终建议'
+  if (plan.status === 'interrupted') return '任务执行已停止'
+  if (plan.status === 'error') return '任务执行未完成'
+  if (plan.status === 'done') {
+    const failedCount = failedPlanTasks(plan)
+    return failedCount
+      ? `已完成 ${plan.tasks.length - failedCount}/${plan.tasks.length} 项任务`
+      : `已完成 ${plan.tasks.length} 项任务`
+  }
+  return `正在执行 ${completedPlanTasks(plan)}/${plan.tasks.length}`
+}
+
+const planStatusLabel = (plan) => {
+  if (isPlanRunning(plan)) return '执行中'
+  if (plan.status === 'done' && !failedPlanTasks(plan)) return '已完成'
+  return plan.status === 'done' ? '部分完成' : '已停止'
+}
+
+const planStatusClass = (plan) => {
+  if (isPlanRunning(plan)) return 'running'
+  return plan.status === 'done' && !failedPlanTasks(plan) ? 'done' : 'error'
+}
 
 const shouldRenderMessage = (message) => {
   if (message.type === 'tool_call') return false
   if (message.role === 'user') return Boolean(message.content)
   if (message.role === 'assistant') {
-    return Boolean(message.content || message.toolCalls?.length || message.status === 'interrupted')
+    return Boolean(message.content || message.toolCalls?.length || message.plan || message.status === 'interrupted')
   }
   return false
 }
@@ -199,10 +226,17 @@ const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false
         chatStore.upsertToolCall(data, sessionId, aiReply.id)
         throttledSave()
         followLatestMessage()
+      },
+      plan => {
+        aiReply.plan = plan
+        throttledSave()
+        followLatestMessage()
       }
     )
+    if (aiReply.plan) aiReply.plan.status = 'done'
     aiReply.status = 'done'
   } catch (err) {
+    if (aiReply.plan) aiReply.plan.status = err.name === 'AbortError' ? 'interrupted' : 'error'
     aiReply.status = 'interrupted'
     if (err.name !== 'AbortError') {
       ElMessage.error(err.message || failureMessage)
@@ -302,6 +336,21 @@ onMounted(() => {
       <div class="message-list">
         <div v-for="item in messages" v-show="shouldRenderMessage(item)" :key="item.id" :class="['message-item', item.role === 'assistant' ? 'ai-message' : 'user-message']">
           <div v-if="item.role === 'assistant'" class="assistant-turn">
+            <details v-if="item.plan?.tasks?.length" class="tool-trace plan-trace" :open="isPlanRunning(item.plan)">
+              <summary>
+                <span class="tool-trace-icon">✦</span>
+                <span class="tool-trace-title">{{ planTraceTitle(item.plan) }}</span>
+                <span :class="['tool-trace-status', planStatusClass(item.plan)]">
+                  {{ planStatusLabel(item.plan) }}
+                </span>
+              </summary>
+              <div class="tool-trace-list">
+                <div v-for="task in item.plan.tasks" :key="task.id" class="tool-trace-row">
+                  <span :class="['tool-step-dot', task.status]"></span>
+                  <div><strong>{{ task.description }}</strong></div>
+                </div>
+              </div>
+            </details>
             <details v-if="item.toolCalls?.length" class="tool-trace" :open="hasRunningTools(item.toolCalls)">
               <summary>
                 <span class="tool-trace-icon">✦</span>
@@ -503,7 +552,6 @@ onMounted(() => {
   display: flex;
   min-height: 100%;
   flex-direction: column;
-  justify-content: flex-end;
   padding: 4px 0;
 }
 
@@ -712,6 +760,8 @@ onMounted(() => {
 .tool-trace-status { margin-left: auto; font-size: 11px; }
 .tool-trace-status.running { color: #c47a12; }
 .tool-trace-status.done { color: #25815a; }
+.tool-trace-status.error { color: #c14e4e; }
+.plan-trace .tool-trace-icon { color: #6d63eb; }
 
 .tool-trace-list {
   display: grid;
