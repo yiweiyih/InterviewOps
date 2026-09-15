@@ -67,3 +67,53 @@ test('reconnects with Last-Event-ID and ignores replayed message deltas', async 
   assert.deepEqual(seenLastEventIds, ['0', '1'])
   assert.equal(call, 3)
 })
+
+test('resumes a saved run after refresh without creating a second task', async t => {
+  const originalFetch = globalThis.fetch
+  const originalLocalStorage = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem() {
+      return JSON.stringify({ token: 'test-token' })
+    }
+  }
+
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return streamResponse(
+      'id: 4\nevent: message_delta\ndata: {"content":"继续"}\n\n'
+      + 'id: 5\nevent: done\ndata: {"status":"completed"}\n\n'
+    )
+  }
+
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  })
+
+  const { streamChat } = await import('../src/utils/sseClient.js')
+  const chunks = []
+  const checkpoints = []
+  await streamChat(
+    '/api/agent/runs',
+    [],
+    content => chunks.push(content),
+    new AbortController().signal,
+    undefined,
+    undefined,
+    undefined,
+    {
+      requestId: 'request_saved',
+      runId: 'run_saved',
+      lastSeq: 3,
+      onCheckpoint: checkpoint => checkpoints.push(checkpoint)
+    }
+  )
+
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].options.method, 'GET')
+  assert.equal(requests[0].options.headers['Last-Event-ID'], '3')
+  assert.deepEqual(chunks, ['继续'])
+  assert.deepEqual(checkpoints.map(item => item.lastSeq), [3, 4, 5])
+  assert.ok(checkpoints.every(item => item.runId === 'run_saved'))
+})

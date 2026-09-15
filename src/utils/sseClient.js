@@ -102,7 +102,6 @@ async function consumeEvents(url, runId, state, handlers, signal) {
     const seq = Number(id)
     if (Number.isFinite(seq)) {
       if (seq <= state.lastSeq) return
-      state.lastSeq = seq
     }
 
     let json
@@ -115,19 +114,25 @@ async function consumeEvents(url, runId, state, handlers, signal) {
 
     if (event === 'done') {
       completed = true
-      return
-    }
-    if (event === 'error' || json.error) {
+    } else if (event === 'error' || json.error) {
       terminalError = new Error(json.error || '任务执行失败')
+      terminalError.terminal = true
       completed = true
-      return
+    } else if (event === 'citations') {
+      handlers.onCitations?.(json)
+    } else if (event === 'tool_call') {
+      handlers.onToolCall?.(json)
+    } else if (event === 'plan_progress') {
+      handlers.onPlanProgress?.(json)
+    } else {
+      const content = json.content || json.choices?.[0]?.delta?.content || ''
+      if (content) handlers.onChunk(content)
     }
-    if (event === 'citations') return handlers.onCitations?.(json)
-    if (event === 'tool_call') return handlers.onToolCall?.(json)
-    if (event === 'plan_progress') return handlers.onPlanProgress?.(json)
 
-    const content = json.content || json.choices?.[0]?.delta?.content || ''
-    if (content) handlers.onChunk(content)
+    if (Number.isFinite(seq)) {
+      state.lastSeq = seq
+      handlers.onCheckpoint?.({ runId, lastSeq: state.lastSeq })
+    }
   })
 
   while (!completed) {
@@ -153,16 +158,33 @@ export async function streamChat(
   signal,
   onCitations,
   onToolCall,
-  onPlanProgress
+  onPlanProgress,
+  options = {}
 ) {
-  const requestId = createRequestId()
-  let runId = null
+  const requestId = options.requestId || createRequestId()
+  let runId = options.runId || null
+  const parsedLastSeq = Number(options.lastSeq)
+  const state = {
+    lastSeq: Number.isFinite(parsedLastSeq) ? Math.max(0, parsedLastSeq) : 0
+  }
+  const checkpoint = ({ lastSeq = state.lastSeq } = {}) => {
+    options.onCheckpoint?.({ requestId, runId, lastSeq })
+  }
 
   try {
-    const created = await createRun(url, messages, requestId, signal)
-    runId = created.runId
-    const state = { lastSeq: 0 }
-    const handlers = { onChunk, onCitations, onToolCall, onPlanProgress }
+    checkpoint()
+    if (!runId) {
+      const created = await createRun(url, messages, requestId, signal)
+      runId = created.runId
+      checkpoint()
+    }
+    const handlers = {
+      onChunk,
+      onCitations,
+      onToolCall,
+      onPlanProgress,
+      onCheckpoint: checkpoint
+    }
     let reconnectAttempt = 0
 
     while (true) {

@@ -9,6 +9,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { useTodoStore } from '../stores/todo'
 import { streamChat } from '../utils/sseClient'
+import { clearActiveRun, loadActiveRun, saveActiveRun } from '../utils/agentRunState'
 import { apiUrl } from '../utils/api'
 
 const chatStore = useChatStore()
@@ -189,15 +190,25 @@ const flushPendingChunks = (aiReply) => {
   chunkBuffer = ''
 }
 
-const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false } = {}) => {
-  const sessionId = chatStore.currentSessionId
-  const aiReply = chatStore.startAssistantMessage()
+const runGeneration = async (
+  apiMessages,
+  failureMessage,
+  { refreshTodos = false, resumeState = null } = {}
+) => {
+  const sessionId = resumeState?.sessionId || chatStore.currentSessionId
+  const session = chatStore.sessions.get(sessionId)
+  const aiReply = resumeState
+    ? session?.messages.find(message => message.id === resumeState.assistantMessageId)
+    : chatStore.startAssistantMessage()
   if (!aiReply || !sessionId) return
 
+  if (resumeState) chatStore.setCurrentSession(sessionId)
   isGenerating.value = true
   aiReply.status = 'streaming'
   chunkBuffer = ''
   chatStore.saveToStorage()
+  let pendingCheckpoint = null
+  let checkpointTimer = null
 
   const onChunk = (content) => {
     chunkBuffer += content
@@ -208,6 +219,32 @@ const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false
       flushTimer = null
       throttledSave()
     }, 50)
+  }
+
+  const persistCheckpoint = () => {
+    if (!pendingCheckpoint) return
+    if (checkpointTimer) {
+      clearTimeout(checkpointTimer)
+      checkpointTimer = null
+    }
+    flushPendingChunks(aiReply)
+    chatStore.saveToStorage()
+    saveActiveRun({
+      ...pendingCheckpoint,
+      sessionId,
+      assistantMessageId: aiReply.id,
+      refreshTodos
+    })
+    pendingCheckpoint = null
+  }
+
+  const onCheckpoint = (checkpoint) => {
+    pendingCheckpoint = checkpoint
+    if (!checkpoint.runId && checkpoint.lastSeq === 0) {
+      persistCheckpoint()
+      return
+    }
+    if (!checkpointTimer) checkpointTimer = setTimeout(persistCheckpoint, 100)
   }
 
   abortController = new AbortController()
@@ -231,17 +268,30 @@ const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false
         aiReply.plan = plan
         throttledSave()
         followLatestMessage()
+      },
+      {
+        requestId: resumeState?.requestId,
+        runId: resumeState?.runId,
+        lastSeq: resumeState?.lastSeq,
+        onCheckpoint
       }
     )
+    persistCheckpoint()
+    clearActiveRun()
     if (aiReply.plan) aiReply.plan.status = 'done'
     aiReply.status = 'done'
   } catch (err) {
+    clearActiveRun()
     if (aiReply.plan) aiReply.plan.status = err.name === 'AbortError' ? 'interrupted' : 'error'
     aiReply.status = 'interrupted'
     if (err.name !== 'AbortError') {
       ElMessage.error(err.message || failureMessage)
     }
   } finally {
+    if (checkpointTimer) {
+      clearTimeout(checkpointTimer)
+      checkpointTimer = null
+    }
     flushPendingChunks(aiReply)
     if (saveTimer) {
       clearTimeout(saveTimer)
@@ -286,8 +336,29 @@ const handleRegenerate = async (msgId) => {
   await runGeneration(buildApiMessages(session.messages), '重新生成失败，请稍后重试')
 }
 
-onMounted(() => {
+onMounted(async () => {
   chatStore.initFromStorage()
+  const activeRun = loadActiveRun()
+  if (activeRun) {
+    const session = chatStore.sessions.get(activeRun.sessionId)
+    const aiReply = session?.messages.find(
+      message => message.id === activeRun.assistantMessageId
+    )
+    if (session && aiReply) {
+      chatStore.setCurrentSession(activeRun.sessionId)
+      nextTick(scrollToBottom)
+      const apiMessages = buildApiMessages(
+        session.messages.filter(message => message.id !== aiReply.id)
+      )
+      await runGeneration(
+        apiMessages,
+        '恢复生成失败，请稍后重试',
+        { refreshTodos: activeRun.refreshTodos, resumeState: activeRun }
+      )
+      return
+    }
+    clearActiveRun()
+  }
   nextTick(scrollToBottom)
 })
 </script>
