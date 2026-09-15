@@ -1,13 +1,17 @@
 export function createSseParser(onEvent) {
   let buffer = ''
   let eventName = 'message'
+  let eventId = ''
   let dataLines = []
 
   const dispatch = () => {
     if (dataLines.length > 0) {
-      onEvent({ event: eventName, data: dataLines.join('\n') })
+      const parsedEvent = { event: eventName, data: dataLines.join('\n') }
+      if (eventId) parsedEvent.id = eventId
+      onEvent(parsedEvent)
     }
     eventName = 'message'
+    eventId = ''
     dataLines = []
   }
 
@@ -26,6 +30,7 @@ export function createSseParser(onEvent) {
     if (value.startsWith(' ')) value = value.slice(1)
 
     if (field === 'event') eventName = value || 'message'
+    if (field === 'id') eventId = value
     if (field === 'data') dataLines.push(value)
   }
 

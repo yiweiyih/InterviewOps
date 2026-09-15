@@ -29,6 +29,8 @@ function normalizeRoute(method, rawUrl) {
 
   if (/^\/api\/todos\/[^/]+\/toggle$/.test(pathname)) return '/api/todos/:id/toggle';
   if (/^\/api\/todos\/[^/]+$/.test(pathname)) return '/api/todos/:id';
+  if (/^\/api\/agent\/runs\/[^/]+\/events$/.test(pathname)) return '/api/agent/runs/:id/events';
+  if (/^\/api\/agent\/runs\/[^/]+\/cancel$/.test(pathname)) return '/api/agent/runs/:id/cancel';
   if (method === 'DELETE' && /^\/api\/knowledge\/.+/.test(pathname)) return '/api/knowledge/:document';
   return pathname;
 }

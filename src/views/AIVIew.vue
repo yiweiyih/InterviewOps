@@ -214,7 +214,7 @@ const runGeneration = async (apiMessages, failureMessage, { refreshTodos = false
 
   try {
     await streamChat(
-      apiUrl('/api/chat'),
+      apiUrl('/api/agent/runs'),
       apiMessages,
       onChunk,
       abortController.signal,

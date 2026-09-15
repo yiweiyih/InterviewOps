@@ -16,6 +16,8 @@ test.beforeEach(resetMetrics);
 test('normalizes dynamic routes to avoid high-cardinality metrics', () => {
   assert.equal(normalizeRoute('DELETE', '/api/todos/123'), '/api/todos/:id');
   assert.equal(normalizeRoute('PATCH', '/api/todos/123/toggle'), '/api/todos/:id/toggle');
+  assert.equal(normalizeRoute('GET', '/api/agent/runs/run_123/events'), '/api/agent/runs/:id/events');
+  assert.equal(normalizeRoute('POST', '/api/agent/runs/run_123/cancel'), '/api/agent/runs/:id/cancel');
   assert.equal(normalizeRoute('DELETE', '/api/knowledge/resume.md'), '/api/knowledge/:document');
 });
 

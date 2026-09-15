@@ -13,6 +13,7 @@ const { createInterviewService } = require('./interview/service');
 const { createInterviewHandler } = require('./interview/routes');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
 const { getLlmTools, validateToolArguments } = require('./tools/catalog');
+const { createRunManager } = require('./run-manager');
 const {
   normalizeRoute,
   recordHttp,
@@ -100,6 +101,13 @@ function withTimeout(promise, timeoutMs, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('任务已取消');
+  error.name = 'AbortError';
+  throw error;
+}
+
 async function observeLlm(operation, request) {
   const startedAt = performance.now();
   try {
@@ -128,6 +136,7 @@ const handleInterviewRequest = createInterviewHandler({
   readBody,
   sendJson
 });
+const agentRuns = createRunManager();
 
 // ── MCP Client ────────────────────────────────────────────
 function callMcpTool(toolName, args, timeoutMs = 12000) {
@@ -186,7 +195,7 @@ const server = http.createServer(async (req, res) => {
   // 设置CORS头
   res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE, PATCH, PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-Id, Idempotency-Key, Last-Event-ID');
   
   // 处理OPTIONS请求
   if (req.method === 'OPTIONS') {
@@ -196,9 +205,48 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await handleInterviewRequest(req, res)) return;
+
+  const requestUrl = new URL(req.url, 'http://localhost');
+  const runEventsMatch = requestUrl.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/events$/);
+  const runCancelMatch = requestUrl.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/cancel$/);
+
+  if (req.method === 'POST' && requestUrl.pathname === '/api/agent/runs') {
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
+    const requestData = await readBody(req);
+    const messages = requestData.messages;
+    const clientRequestId = String(req.headers['idempotency-key'] || requestData.requestId || '').trim();
+    if (!Array.isArray(messages) || !clientRequestId) {
+      sendJson(res, { error: '缺少 messages 或 requestId' }, 400);
+      return;
+    }
+    try {
+      const run = agentRuns.createRun({
+        userId: user.userId,
+        requestId: clientRequestId,
+        execute: (sink, signal) => handleWithPlanning(messages, sink, user.userId, signal)
+      });
+      sendJson(res, run, run.reused ? 200 : 202);
+    } catch (error) {
+      sendJson(res, { error: error.message }, 400);
+    }
+  } else if (req.method === 'GET' && runEventsMatch) {
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
+    const runId = decodeURIComponent(runEventsMatch[1]);
+    const lastEventId = req.headers['last-event-id'] || requestUrl.searchParams.get('after') || 0;
+    if (!agentRuns.subscribe({ runId, userId: user.userId, lastEventId, res })) {
+      sendJson(res, { error: '任务不存在或已过期' }, 404);
+    }
+  } else if (req.method === 'POST' && runCancelMatch) {
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
+    const run = agentRuns.cancelRun(decodeURIComponent(runCancelMatch[1]), user.userId);
+    if (!run) sendJson(res, { error: '任务不存在或已过期' }, 404);
+    else sendJson(res, run);
   
   // 只处理POST请求到/api/chat
-  if (req.method === 'POST' && req.url === '/api/chat') {
+  } else if (req.method === 'POST' && req.url === '/api/chat') {
     const user = verifyToken(req);
     if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
     let body = '';
@@ -429,7 +477,8 @@ async function planTasks(userMessage) {
 }
 
 // 执行单个子任务，把前置任务结果注入context，复用现有ReAct循环
-async function executeTaskNode(task, results, originalMessages, userId) {
+async function executeTaskNode(task, results, originalMessages, userId, signal) {
+  throwIfAborted(signal);
   const prevContext = (task.dependsOn || [])
     .map(id => `子任务${id}的结果：${results[id] || '无结果'}`)
     .join('\n');
@@ -450,7 +499,10 @@ async function executeTaskNode(task, results, originalMessages, userId) {
     const fakeRes = {
       _headers: {},
       _written: false,
+      writableEnded: false,
+      destroyed: false,
       setHeader(k, v) { this._headers[k] = v; },
+      once() {},
       write(chunk) {
         const str = typeof chunk === 'string' ? chunk : chunk.toString();
         // 只收集 data: {"content":"..."} 行
@@ -464,14 +516,17 @@ async function executeTaskNode(task, results, originalMessages, userId) {
           } catch { /* ignore */ }
         }
       },
-      end() { resolve(collected); }
+      end() {
+        this.writableEnded = true;
+        resolve(collected);
+      }
     };
-    handleWithFunctionCalling(taskMessages, fakeRes, userId).catch(() => resolve(collected));
+    handleWithFunctionCalling(taskMessages, fakeRes, userId, signal).catch(() => resolve(collected));
   });
 }
 
 // 完整规划+调度流程
-async function handleWithPlanning(messages, res, userId) {
+async function handleWithPlanning(messages, res, userId, signal) {
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
 
   // SSE 头
@@ -481,10 +536,11 @@ async function handleWithPlanning(messages, res, userId) {
   res.setHeader('X-Accel-Buffering', 'no');
 
   const tasks = await planTasks(lastUserMsg);
+  throwIfAborted(signal);
 
   // 普通对话直接走原有流程
   if (!tasks || tasks.length === 0) {
-    handleWithFunctionCalling(messages, res, userId);
+    handleWithFunctionCalling(messages, res, userId, signal);
     return;
   }
 
@@ -508,12 +564,13 @@ async function handleWithPlanning(messages, res, userId) {
   writePlanProgress();
 
   for (const task of ordered) {
+    throwIfAborted(signal);
     const currentTask = plan.tasks.find(item => item.id === task.id);
     if (currentTask) currentTask.status = 'running';
     writePlanProgress();
 
     try {
-      results[task.id] = await executeTaskNode(task, results, messages, userId);
+      results[task.id] = await executeTaskNode(task, results, messages, userId, signal);
       if (currentTask) currentTask.status = 'done';
     } catch (e) {
       results[task.id] = `执行失败: ${e.message}`;
@@ -550,7 +607,7 @@ function callDeepSeekWithTools(messages) {
 }
 
 // 完整的 Agent Loop：支持多工具串联，最多 5 轮
-async function handleWithFunctionCalling(messages, res, userId) {
+async function handleWithFunctionCalling(messages, res, userId, signal) {
   // 对话前：检索长期记忆，注入 system prompt
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
   let memoryContext = '';
@@ -611,6 +668,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
 
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      throwIfAborted(signal);
       console.log(`[Agent] 第 ${round + 1} 轮：发送给 DeepSeek`);
       const response = await observeLlm('agent_decision', () => callDeepSeekWithTools(loopMessages));
       const choice = response.choices?.[0];
@@ -640,6 +698,7 @@ async function handleWithFunctionCalling(messages, res, userId) {
 
       const settledResults = await Promise.allSettled(
         toolCalls.map(async (toolCall) => {
+          throwIfAborted(signal);
           const toolStartedAt = performance.now();
           const toolName = toolCall.function.name;
           try {

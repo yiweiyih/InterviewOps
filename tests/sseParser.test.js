@@ -44,3 +44,19 @@ test('keeps structured plan progress separate from answer content', () => {
     { event: 'message', data: '{"content":"最终回答"}' }
   ])
 })
+
+test('parses event ids used for resume and resets them per event', () => {
+  const events = []
+  const parser = createSseParser(event => events.push(event))
+
+  parser.feed('id: 41\nevent: message_delta\ndata: {"content":"你"}\n\n')
+  parser.feed('id: 42\nevent: message_delta\ndata: {"content":"好"}\n\n')
+  parser.feed('event: done\ndata: {"status":"completed"}\n\n')
+  parser.finish()
+
+  assert.deepEqual(events, [
+    { event: 'message_delta', data: '{"content":"你"}', id: '41' },
+    { event: 'message_delta', data: '{"content":"好"}', id: '42' },
+    { event: 'done', data: '{"status":"completed"}' }
+  ])
+})

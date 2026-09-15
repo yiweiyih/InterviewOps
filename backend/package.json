@@ -9,7 +9,7 @@
     "dev": "node index.js",
     "mcp": "node mcp-server.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check index.js && node --check mcp-server.js && node --check rag/index.js && node --check documents/extract-text.js && node --check interview/store.js && node --check interview/rubric.js && node --check interview/service.js && node --check interview/routes.js && node --check memory/index.js && node --check evals/run-tool-routing.js && node --check evals/run-interview-contract.js",
+    "check": "node --check index.js && node --check run-manager.js && node --check mcp-server.js && node --check rag/index.js && node --check documents/extract-text.js && node --check interview/store.js && node --check interview/rubric.js && node --check interview/service.js && node --check interview/routes.js && node --check memory/index.js && node --check evals/run-tool-routing.js && node --check evals/run-interview-contract.js",
     "eval:tools": "node evals/run-tool-routing.js",
     "eval:tools:dry": "node evals/run-tool-routing.js --dry-run",
     "eval:interview": "node evals/run-interview-contract.js"
