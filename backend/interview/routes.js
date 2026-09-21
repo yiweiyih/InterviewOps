@@ -51,10 +51,28 @@ function createInterviewHandler({ service, verifyToken, readBody, sendJson }) {
         return true;
       }
 
+      const reviewMatch = url.pathname.match(/^\/api\/interview\/sessions\/([^/]+)\/review$/);
+      if (req.method === 'POST' && reviewMatch) {
+        const body = await readBody(req);
+        const session = await service.reviewSession(user.userId, reviewMatch[1], {
+          regenerate: body?.regenerate === true
+        });
+        sendJson(res, { session: toPublicSession(session) });
+        return true;
+      }
+
+      const practiceMatch = url.pathname.match(/^\/api\/interview\/sessions\/([^/]+)\/review\/practice$/);
+      if (req.method === 'POST' && practiceMatch) {
+        const body = await readBody(req);
+        const session = await service.practiceReview(user.userId, practiceMatch[1], body?.day, body?.answer);
+        sendJson(res, { session: toPublicSession(session) });
+        return true;
+      }
+
       sendJson(res, { error: '未找到面试工作区接口' }, 404);
       return true;
     } catch (error) {
-      const isValidationError = /至少|不能超过|已经结束|没有找到|无效/.test(error.message);
+      const isValidationError = /至少|不能超过|不能更换|已经结束|没有找到|无效|请先结束|请先升级|没有可复盘|请先完成|已达到|正在评估/.test(error.message);
       sendJson(res, { error: error.message }, isValidationError ? 400 : 502);
       return true;
     }

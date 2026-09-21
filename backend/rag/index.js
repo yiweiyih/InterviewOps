@@ -2,6 +2,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { extractDocumentText } = require('../documents/extract-text');
+const { asUtf8 } = require('../utf8-stream');
 require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
@@ -100,6 +101,7 @@ function getEmbedding(input) {
     };
     const req = https.request(options, (res) => {
       let data = '';
+      asUtf8(res);
       res.on('data', c => data += c);
       res.on('end', () => {
         try {
@@ -212,6 +214,7 @@ function rerankDocuments(query, candidates, topK) {
     };
     const req = https.request(options, res => {
       let data = '';
+      asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {

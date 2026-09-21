@@ -3,6 +3,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { getMcpTools, validateToolArguments } = require('./tools/catalog');
+const { asUtf8 } = require('./utf8-stream');
 
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
@@ -65,6 +66,7 @@ function searchWeb(query) {
     };
     const req = https.request(options, (res) => {
       let data = '';
+      asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
@@ -95,6 +97,7 @@ function fetchWeather(city) {
 
     const req = https.get(url, { headers: { 'User-Agent': 'curl/7.68.0' } }, (res) => {
       let data = '';
+      asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {

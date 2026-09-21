@@ -9,10 +9,12 @@
     "dev": "node index.js",
     "mcp": "node mcp-server.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check index.js && node --check run-manager.js && node --check mcp-server.js && node --check rag/index.js && node --check documents/extract-text.js && node --check interview/store.js && node --check interview/rubric.js && node --check interview/service.js && node --check interview/routes.js && node --check memory/index.js && node --check evals/run-tool-routing.js && node --check evals/run-interview-contract.js",
+    "check": "node --check index.js && node --check utf8-stream.js && node --check run-manager.js && node --check mcp-server.js && node --check rag/index.js && node --check documents/extract-text.js && node --check interview/store.js && node --check interview/rubric.js && node --check interview/service.js && node --check interview/routes.js && node --check skills/interview-review/index.js && node --check memory/index.js && node --check evals/run-tool-routing.js && node --check evals/run-interview-contract.js && node --check evals/run-review-quality.js",
     "eval:tools": "node evals/run-tool-routing.js",
     "eval:tools:dry": "node evals/run-tool-routing.js --dry-run",
-    "eval:interview": "node evals/run-interview-contract.js"
+    "eval:interview": "node evals/run-interview-contract.js",
+    "eval:review": "node evals/run-review-quality.js",
+    "eval:review:live": "node evals/run-review-quality.js --live"
   },
   "engines": {
     "node": ">=22.12.0 <25"

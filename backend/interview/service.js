@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { InterviewStore } = require('./store');
+const { generateReview, REVIEW_VERSION } = require('../skills/interview-review');
 const {
   INTERVIEW_MODES,
   SCORE_DIMENSIONS,
@@ -96,6 +97,8 @@ function toPublicSession(session) {
 
 function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
   const store = new InterviewStore(dataDir);
+  const reviewInFlight = new Map();
+  const practiceInFlight = new Map();
 
   async function getContext(userId, workspace, mode) {
     try {
@@ -204,6 +207,111 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
       return store.getSession(userId, sessionId);
     },
 
+    async reviewSession(userId, sessionId, { regenerate = false } = {}) {
+      const session = store.getSession(userId, sessionId);
+      if (!session) throw new Error('没有找到这场模拟面试');
+      if (session.status !== 'completed') throw new Error('请先结束这场模拟面试再生成复盘计划');
+      if (!session.turns?.length || !session.report?.answeredQuestions) {
+        throw new Error('没有可复盘的回答');
+      }
+      const key = JSON.stringify([userId, sessionId]);
+      if (reviewInFlight.has(key)) return reviewInFlight.get(key);
+      const upgradingLegacy = regenerate && session.skillReview && session.skillReview.version !== REVIEW_VERSION;
+      if (session.skillReview && !upgradingLegacy) return session;
+      if (upgradingLegacy && session.practiceAttempts?.length) {
+        throw new Error('这份计划已有再练习记录，不能更换题目依据');
+      }
+      const pending = (async () => {
+        const skillReview = await generateReview({
+          session,
+          callJson,
+          retrieveKnowledge,
+          parseJsonResponse,
+          userId
+        });
+        const latest = store.getSession(userId, sessionId);
+        if (!latest) throw new Error('没有找到这场模拟面试');
+        if (latest.skillReview && !upgradingLegacy) return latest;
+        if (upgradingLegacy && latest.practiceAttempts?.length) {
+          throw new Error('这份计划已有再练习记录，不能更换题目依据');
+        }
+        if (upgradingLegacy && latest.skillReview) {
+          latest.skillReviewHistory = [...(latest.skillReviewHistory || []), latest.skillReview];
+        }
+        latest.skillReview = skillReview;
+        latest.updatedAt = new Date().toISOString();
+        return store.saveSession(userId, latest);
+      })();
+      reviewInFlight.set(key, pending);
+      try {
+        return await pending;
+      } finally {
+        reviewInFlight.delete(key);
+      }
+    },
+
+    async practiceReview(userId, sessionId, rawDay, rawAnswer) {
+      const day = Number(rawDay);
+      const answer = String(rawAnswer || '').trim();
+      if (!Number.isInteger(day) || day < 1 || day > 3) throw new Error('无效的复习任务');
+      if (answer.length < 20) throw new Error('练习回答至少需要 20 个字符');
+      if (answer.length > 10_000) throw new Error('练习回答不能超过 10,000 个字符');
+
+      const session = store.getSession(userId, sessionId);
+      if (!session) throw new Error('没有找到这场模拟面试');
+      if (session.status !== 'completed' || !session.skillReview) throw new Error('请先完成面试并生成复习计划');
+      if (session.skillReview.version !== REVIEW_VERSION) throw new Error('请先升级旧版复盘计划再练习');
+      const planDay = session.skillReview.days?.find(item => item.day === day);
+      const questionNumber = planDay?.evidence?.questionNumber || planDay?.evidenceQuestionNumbers?.[0];
+      const originalTurn = session.turns?.[questionNumber - 1];
+      if (!originalTurn) throw new Error('复习任务没有有效的原题');
+      if ((session.practiceAttempts || []).some(item => item.day === day && item.answer === answer)) return session;
+      if ((session.practiceAttempts || []).filter(item => item.day === day).length >= 5) {
+        throw new Error('这一天的练习已达到 5 次上限');
+      }
+
+      const key = JSON.stringify([userId, sessionId]);
+      const answerHash = crypto.createHash('sha256').update(answer).digest('hex');
+      const running = practiceInFlight.get(key);
+      if (running) {
+        if (running.day === day && running.answerHash === answerHash) return running.promise;
+        throw new Error('上一份练习正在评估，请稍后重试');
+      }
+      const pending = (async () => {
+        const target = session.reviewContext || { role: '', jobDescription: '' };
+        const feedback = await evaluateAnswer({
+          session: { ...session, currentQuestion: originalTurn.question },
+          answer,
+          workspace: {
+            profile: { targetRole: target.role },
+            target: { jobDescription: target.jobDescription }
+          }
+        });
+        const latest = store.getSession(userId, sessionId);
+        if (!latest) throw new Error('没有找到这场模拟面试');
+        latest.practiceAttempts ||= [];
+        if (latest.practiceAttempts.some(item => item.day === day && item.answer === answer)) return latest;
+        latest.practiceAttempts.push({
+          id: crypto.randomUUID(),
+          day,
+          questionNumber,
+          questionText: originalTurn.question.text,
+          answer,
+          feedback,
+          originalAverageScore: originalTurn.feedback.averageScore,
+          createdAt: new Date().toISOString()
+        });
+        latest.updatedAt = new Date().toISOString();
+        return store.saveSession(userId, latest);
+      })();
+      practiceInFlight.set(key, { day, answerHash, promise: pending });
+      try {
+        return await pending;
+      } finally {
+        practiceInFlight.delete(key);
+      }
+    },
+
     getSummary(userId) {
       const workspace = store.getWorkspace(userId);
       const sessions = store.listSessions(userId);
@@ -265,6 +373,10 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
         updatedAt: now,
         currentQuestion: firstQuestion,
         contextSources: [...new Set(context.map(item => item.source))],
+        reviewContext: {
+          role: workspace.profile.targetRole || workspace.target.jobTitle,
+          jobDescription: workspace.target.jobDescription.slice(0, 1500)
+        },
         turns: [],
         report: null
       };

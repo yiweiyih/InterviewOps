@@ -39,5 +39,11 @@ export const interviewApi = {
   answerSession: (id, answer) => requestJson(`/api/interview/sessions/${id}/answer`, {
     method: 'POST', body: JSON.stringify({ answer })
   }),
-  completeSession: id => requestJson(`/api/interview/sessions/${id}/complete`, { method: 'POST' })
+  completeSession: id => requestJson(`/api/interview/sessions/${id}/complete`, { method: 'POST' }),
+  reviewSession: (id, regenerate = false) => requestJson(`/api/interview/sessions/${id}/review`, {
+    method: 'POST', body: JSON.stringify({ regenerate })
+  }),
+  practiceReview: (id, day, answer) => requestJson(`/api/interview/sessions/${id}/review/practice`, {
+    method: 'POST', body: JSON.stringify({ day, answer })
+  })
 }

@@ -14,6 +14,7 @@ const { createInterviewHandler } = require('./interview/routes');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
 const { getLlmTools, validateToolArguments } = require('./tools/catalog');
 const { createRunManager } = require('./run-manager');
+const { asUtf8 } = require('./utf8-stream');
 const {
   normalizeRoute,
   recordHttp,
@@ -81,6 +82,7 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
+    asUtf8(req);
     req.on('data', chunk => body += chunk);
     req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
     req.on('error', reject);
@@ -157,6 +159,7 @@ function callMcpTool(toolName, args, timeoutMs = 12000) {
     };
     const req = http.request(options, (res) => {
       let data = '';
+      asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         let json;
@@ -250,6 +253,7 @@ const server = http.createServer(async (req, res) => {
     const user = verifyToken(req);
     if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
     let body = '';
+    asUtf8(req);
     
     // 接收请求体
     req.on('data', (chunk) => {
@@ -412,6 +416,7 @@ function requestDeepSeekJson(payload, label) {
     };
     const req = https.request(options, (res) => {
       let data = '';
+      asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         let json;
@@ -846,6 +851,7 @@ function handleStreamRequest(messages, res, headersAlreadySet = false) {
   }
 
   const maasReq = https.request(options, (maasRes) => {
+    asUtf8(maasRes);
     if (maasRes.statusCode < 200 || maasRes.statusCode >= 300) {
       let errorBody = '';
       maasRes.on('data', chunk => errorBody += chunk);
@@ -860,7 +866,7 @@ function handleStreamRequest(messages, res, headersAlreadySet = false) {
     let buffer = '';
 
     maasRes.on('data', (chunk) => {
-      buffer += chunk.toString();
+      buffer += chunk;
       const lines = buffer.split('\n');
       buffer = lines.pop(); // 保留不完整的最后一行
 
