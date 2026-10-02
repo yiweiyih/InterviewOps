@@ -1,0 +1,42 @@
+[
+  {
+    "name": "首题缺少验证指标，继续追问证据",
+    "mode": "project",
+    "turns": [
+      {
+        "question": { "text": "请介绍你负责的检索项目和技术决策。", "followUp": { "strategy": "opening", "targetDimension": "problem" } },
+        "feedback": { "scores": { "problem": 4, "depth": 2, "ownership": 3, "communication": 4 }, "missingPoints": ["缺少验证指标"], "gapDetails": [{ "dimension": "depth", "point": "缺少验证指标" }] }
+      }
+    ],
+    "expected": { "strategy": "deepen", "targetDimension": "depth", "targetGap": "缺少验证指标" },
+    "candidateQuestion": "刚才的检索方案缺少验证指标，你会用哪些数据和对照方式判断它是否有效？"
+  },
+  {
+    "name": "已深挖一轮，转向未覆盖的个人贡献",
+    "mode": "project",
+    "turns": [
+      {
+        "question": { "text": "请介绍你负责的检索项目和技术决策。", "followUp": { "strategy": "opening", "targetDimension": "problem" } },
+        "feedback": { "scores": { "problem": 4, "depth": 2, "ownership": 3, "communication": 4 }, "missingPoints": ["缺少验证指标"], "gapDetails": [{ "dimension": "depth", "point": "缺少验证指标" }] }
+      },
+      {
+        "question": { "text": "刚才的检索方案缺少验证指标，你会用哪些数据和对照方式判断它是否有效？", "followUp": { "strategy": "deepen", "targetDimension": "depth" } },
+        "feedback": { "scores": { "problem": 4, "depth": 3, "ownership": 2, "communication": 4 }, "missingPoints": ["缺少线上结果"] }
+      }
+    ],
+    "expected": { "strategy": "switch", "targetDimension": "ownership", "targetGap": null },
+    "candidateQuestion": "换一个协作场景，说明你个人推动了哪项关键决策，遇到阻力时如何处理？"
+  },
+  {
+    "name": "没有明确缺口，转向尚未考察的技术深度",
+    "mode": "project",
+    "turns": [
+      {
+        "question": { "text": "请说明项目目标以及你如何定义问题。", "followUp": { "strategy": "opening", "targetDimension": "problem" } },
+        "feedback": { "scores": { "problem": 4, "depth": 2, "ownership": 3, "communication": 4 }, "missingPoints": [] }
+      }
+    ],
+    "expected": { "strategy": "switch", "targetDimension": "depth", "targetGap": null },
+    "candidateQuestion": "针对这个项目，最难的技术约束是什么，你如何比较不同实现方案？"
+  }
+]

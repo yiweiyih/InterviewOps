@@ -15,6 +15,7 @@
     "eval:tools": "npm --prefix backend run eval:tools",
     "eval:tools:dry": "npm --prefix backend run eval:tools:dry",
     "eval:interview": "npm --prefix backend run eval:interview",
+    "eval:followup": "npm --prefix backend run eval:followup",
     "preview": "vite preview"
   },
   "engines": {

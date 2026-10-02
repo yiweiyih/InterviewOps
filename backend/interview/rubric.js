@@ -84,6 +84,13 @@ function normalizeFeedback(value, mode) {
   const averageScore = Math.round(
     (Object.values(scores).reduce((sum, score) => sum + score, 0) / dimensions.length) * 10
   ) / 10;
+  const missingPoints = toStringList(source.missingPoints || source.missing_points, 4);
+  const gapDetails = Array.isArray(source.gapDetails)
+    ? source.gapDetails
+      .filter(item => item && dimensions.includes(item.dimension) && missingPoints.includes(String(item.point || '').trim()))
+      .map(item => ({ dimension: item.dimension, point: String(item.point).trim() }))
+      .slice(0, 4)
+    : [];
 
   return {
     averageScore,
@@ -91,7 +98,8 @@ function normalizeFeedback(value, mode) {
     summary: String(source.summary || '已完成本题评估').trim(),
     evidence: toStringList(source.evidence, 3),
     strengths: toStringList(source.strengths, 3),
-    missingPoints: toStringList(source.missingPoints || source.missing_points, 4),
+    missingPoints,
+    gapDetails,
     betterStructure: String(source.betterStructure || source.better_structure || '').trim()
   };
 }

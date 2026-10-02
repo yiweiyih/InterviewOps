@@ -46,6 +46,12 @@ test('interview service completes a scored session without sharing user data', a
     assert.equal(afterFirstAnswer.status, 'active');
     assert.equal(afterFirstAnswer.turns.length, 1);
     assert.match(afterFirstAnswer.currentQuestion.text, /如何验证/);
+    assert.deepEqual(afterFirstAnswer.currentQuestion.followUp, {
+      strategy: 'deepen',
+      targetDimension: 'problem',
+      sourceQuestionNumber: 1,
+      targetGap: '补充线上指标'
+    });
 
     const completed = await service.answerSession(
       'user-a',
@@ -87,7 +93,7 @@ test('interview service can end an active session before the first answer', asyn
   }
 });
 
-test('interview service rejects repeated follow-up questions and falls back to a new dimension', async () => {
+test('interview service rejects repeated follow-up questions but preserves the target gap', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
   let questionCalls = 0;
   const repeatedQuestion = '你提到通过路由懒加载和拆包优化首屏性能，请具体说明你如何确定拆分方案并验证效果？';
@@ -126,7 +132,60 @@ test('interview service rejects repeated follow-up questions and falls back to a
 
     assert.equal(questionCalls, 3);
     assert.notEqual(afterFirstAnswer.currentQuestion.text, repeatedQuestion);
-    assert.match(afterFirstAnswer.currentQuestion.text, /尚未讨论/);
+    assert.match(afterFirstAnswer.currentQuestion.text, /补充业务价值/);
+    assert.equal(afterFirstAnswer.currentQuestion.followUp.strategy, 'deepen');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('interview service switches to an uncovered dimension after one targeted follow-up', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
+  const questionPayloads = [];
+  let questionNumber = 0;
+  try {
+    const service = createInterviewService({
+      dataDir: tempDir,
+      callJson: async messages => {
+        if (messages[0].content.includes('复盘教练')) {
+          return {
+            scores: { problem: 4, depth: 2, ownership: 3, communication: 4 },
+            summary: '还需补充证据',
+            evidence: ['我设计了检索链路'],
+            strengths: ['描述了方案'],
+            missingPoints: ['缺少验证指标'],
+            gapDetails: [{ dimension: 'depth', point: '缺少验证指标' }],
+            betterStructure: '方案—验证—结果'
+          };
+        }
+        questionPayloads.push(JSON.parse(messages[1].content));
+        questionNumber += 1;
+        return {
+          text: [
+            '请介绍你负责的检索项目和核心技术决策。',
+            '刚才没有提到验证指标，你会怎样收集证据来判断检索方案是否有效？',
+            '换一个团队协作场景，你如何明确自己的职责并推动方案落地？'
+          ][questionNumber - 1],
+          competency: '项目经验',
+          expectedSignals: ['决策', '证据']
+        };
+      },
+      retrieveKnowledge: async () => []
+    });
+    const session = await service.startSession('user-a', { mode: 'project', questionCount: 3 });
+    const afterFirst = await service.answerSession('user-a', session.id, '我设计了检索链路，并用向量召回与关键词召回组合完成了初版实现。');
+    assert.equal(afterFirst.currentQuestion.followUp.strategy, 'deepen');
+    assert.equal(afterFirst.currentQuestion.followUp.targetDimension, 'depth');
+    assert.equal(questionPayloads[1].followUpDecision.targetGap, '缺少验证指标');
+    assert.deepEqual(questionPayloads[1].previousTurns[0].evidence, ['我设计了检索链路']);
+    assert.deepEqual(questionPayloads[1].previousTurns[0].scores, { problem: 4, depth: 2, ownership: 3, communication: 4 });
+
+    const afterSecond = await service.answerSession('user-a', session.id, '我会记录相关性、命中率和延迟，在固定测试集与线上抽样中验证结果。');
+    assert.equal(afterSecond.currentQuestion.followUp.strategy, 'switch');
+    assert.equal(afterSecond.currentQuestion.followUp.targetDimension, 'ownership');
+    assert.equal(afterSecond.currentQuestion.followUp.targetGap, null);
+    assert.equal(questionPayloads[2].followUpDecision.strategy, 'switch');
+    assert.equal(service.getSession('user-a', session.id).currentQuestion.followUp.targetDimension, 'ownership');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
