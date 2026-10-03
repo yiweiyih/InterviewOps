@@ -51,7 +51,7 @@ function createFixture(reviewOutput, { retrieveKnowledge = async () => [], onRev
 
 const VALID_REVIEW = {
   summary: '优先补齐技术取舍的效果证据。',
-  days: [1, 2, 3].map(day => ({
+  days: [1].map(day => ({
     day,
     focus: '量化验证',
     task: '整理上线前后的效果指标',

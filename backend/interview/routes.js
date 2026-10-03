@@ -37,6 +37,12 @@ function createInterviewHandler({ service, verifyToken, readBody, sendJson }) {
         else sendJson(res, { session: toPublicSession(session) });
         return true;
       }
+      if (req.method === 'DELETE' && sessionMatch) {
+        const deleted = service.deleteSession(user.userId, sessionMatch[1]);
+        if (!deleted) sendJson(res, { error: '没有找到这场模拟面试' }, 404);
+        else sendJson(res, { ok: true });
+        return true;
+      }
 
       const answerMatch = url.pathname.match(/^\/api\/interview\/sessions\/([^/]+)\/answer$/);
       if (req.method === 'POST' && answerMatch) {
@@ -54,9 +60,9 @@ function createInterviewHandler({ service, verifyToken, readBody, sendJson }) {
       const reviewMatch = url.pathname.match(/^\/api\/interview\/sessions\/([^/]+)\/review$/);
       if (req.method === 'POST' && reviewMatch) {
         const body = await readBody(req);
-        const session = await service.reviewSession(user.userId, reviewMatch[1], {
-          regenerate: body?.regenerate === true
-        });
+        const options = { regenerate: body?.regenerate === true };
+        if (body?.nextCycle === true) options.nextCycle = true;
+        const session = await service.reviewSession(user.userId, reviewMatch[1], options);
         sendJson(res, { session: toPublicSession(session) });
         return true;
       }
@@ -69,10 +75,18 @@ function createInterviewHandler({ service, verifyToken, readBody, sendJson }) {
         return true;
       }
 
+      const reinforceMatch = url.pathname.match(/^\/api\/interview\/sessions\/([^/]+)\/review\/reinforce$/);
+      if (req.method === 'POST' && reinforceMatch) {
+        const body = await readBody(req);
+        const session = await service.reinforceReview(user.userId, reinforceMatch[1], body?.questionNumber, body?.answer);
+        sendJson(res, { session: toPublicSession(session) });
+        return true;
+      }
+
       sendJson(res, { error: '未找到面试工作区接口' }, 404);
       return true;
     } catch (error) {
-      const isValidationError = /至少|不能超过|不能更换|已经结束|没有找到|无效|请先结束|请先升级|没有可复盘|请先完成|已达到|正在评估/.test(error.message);
+      const isValidationError = /至少|不能超过|不能更换|已经结束|已结束|没有找到|无效|无需巩固|请先结束|请先生成|请先升级|没有可复盘|没有待复习|没有需要重答|请先完成|已达到|正在评估|正在生成|正在处理/.test(error.message);
       sendJson(res, { error: error.message }, isValidationError ? 400 : 502);
       return true;
     }

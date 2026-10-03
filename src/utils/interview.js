@@ -33,6 +33,7 @@ export const interviewApi = {
   }),
   listSessions: () => requestJson('/api/interview/sessions'),
   getSession: id => requestJson(`/api/interview/sessions/${id}`),
+  deleteSession: id => requestJson(`/api/interview/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   startSession: options => requestJson('/api/interview/sessions', {
     method: 'POST', body: JSON.stringify(options)
   }),
@@ -40,10 +41,13 @@ export const interviewApi = {
     method: 'POST', body: JSON.stringify({ answer })
   }),
   completeSession: id => requestJson(`/api/interview/sessions/${id}/complete`, { method: 'POST' }),
-  reviewSession: (id, regenerate = false) => requestJson(`/api/interview/sessions/${id}/review`, {
-    method: 'POST', body: JSON.stringify({ regenerate })
+  reviewSession: (id, { regenerate = false, nextCycle = false } = {}) => requestJson(`/api/interview/sessions/${id}/review`, {
+    method: 'POST', body: JSON.stringify({ regenerate, nextCycle })
   }),
   practiceReview: (id, day, answer) => requestJson(`/api/interview/sessions/${id}/review/practice`, {
     method: 'POST', body: JSON.stringify({ day, answer })
+  }),
+  reinforceReview: (id, questionNumber, answer) => requestJson(`/api/interview/sessions/${id}/review/reinforce`, {
+    method: 'POST', body: JSON.stringify({ questionNumber, answer })
   })
 }

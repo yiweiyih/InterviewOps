@@ -128,6 +128,15 @@ class InterviewStore {
     this.write(userId, data);
     return session;
   }
+
+  deleteSession(userId, sessionId) {
+    const data = this.read(userId);
+    const index = data.sessions.findIndex(item => item.id === sessionId);
+    if (index < 0) return false;
+    data.sessions.splice(index, 1);
+    this.write(userId, data);
+    return true;
+  }
 }
 
 module.exports = {

@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { InterviewStore } = require('./store');
 const { planFollowUp } = require('./follow-up');
-const { generateReview, REVIEW_VERSION } = require('../skills/interview-review');
+const { generateReview, rankReviewQuestions, REVIEW_VERSION } = require('../skills/interview-review');
 const {
   INTERVIEW_MODES,
   SCORE_DIMENSIONS,
@@ -83,6 +83,52 @@ function compactSession(session) {
   };
 }
 
+function reviewCycleNumber(review) {
+  return Number.isInteger(review?.cycle) && review.cycle > 0 ? review.cycle : 1;
+}
+
+function selectedReviewQuestions(review) {
+  return new Set((review?.days || []).map(day => (
+    day.evidence?.questionNumber || day.evidenceQuestionNumbers?.[0]
+  )).filter(Boolean));
+}
+
+function isReviewCycleComplete(session) {
+  const review = session.skillReview;
+  if (!review?.days?.length) return false;
+  const cycle = reviewCycleNumber(review);
+  const required = new Set(rankReviewQuestions(session).filter(item => item.required).map(item => item.questionNumber));
+  return review.days.filter(day => required.has(day.evidence?.questionNumber || day.evidenceQuestionNumbers?.[0]))
+    .every(day => (session.practiceAttempts || []).some(attempt => (
+    (attempt.cycle || 1) === cycle
+    && attempt.day === day.day
+    && attempt.questionNumber === (day.evidence?.questionNumber || day.evidenceQuestionNumbers?.[0])
+    )));
+}
+
+function isReviewCoverageComplete(session) {
+  return rankReviewQuestions(session).filter(item => item.required)
+    .every(item => item.practicedCount > 0);
+}
+
+function isOutdatedReviewPlan(session) {
+  const review = session.skillReview;
+  if (review?.version !== REVIEW_VERSION || !review.days?.length) return false;
+  const cycle = reviewCycleNumber(review);
+  const previouslyPracticed = new Set((session.practiceAttempts || [])
+    .filter(item => (item.cycle || 1) < cycle).map(item => item.questionNumber));
+  const queue = rankReviewQuestions(session);
+  const expectedCount = Math.min(3, queue.filter(item => item.required && !previouslyPracticed.has(item.questionNumber)).length);
+  const planned = review.days.map(day => day.evidence?.questionNumber || day.evidenceQuestionNumbers?.[0]);
+  return planned.length !== expectedCount
+    || new Set(planned).size !== planned.length
+    || planned.some(number => previouslyPracticed.has(number) || !queue.find(item => item.questionNumber === number)?.required);
+}
+
+function needsReinforcement(item) {
+  return item.currentScore < 4 || item.gapCount > 0;
+}
+
 function toPublicSession(session) {
   if (!session) return session;
   const sanitizeQuestion = question => {
@@ -92,6 +138,13 @@ function toPublicSession(session) {
   };
   return {
     ...session,
+    ...(session.status === 'completed' && session.turns?.length ? {
+      reviewQueue: rankReviewQuestions(session).map(item => ({
+        ...item,
+        inCurrentPlan: selectedReviewQuestions(session.skillReview).has(item.questionNumber),
+        needsReinforcement: item.required && item.practicedCount > 0 && needsReinforcement(item)
+      }))
+    } : {}),
     currentQuestion: sanitizeQuestion(session.currentQuestion),
     turns: (session.turns || []).map(turn => ({
       ...turn,
@@ -222,19 +275,48 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
       return store.getSession(userId, sessionId);
     },
 
-    async reviewSession(userId, sessionId, { regenerate = false } = {}) {
+    deleteSession(userId, sessionId) {
+      const session = store.getSession(userId, sessionId);
+      if (!session) return false;
+      if (session.status === 'active') throw new Error('请先结束正在进行的模拟面试再删除');
+      const key = JSON.stringify([userId, sessionId]);
+      if (reviewInFlight.has(key) || practiceInFlight.has(key)) {
+        throw new Error('复盘或练习正在处理，请稍后再删除');
+      }
+      return store.deleteSession(userId, sessionId);
+    },
+
+    async reviewSession(userId, sessionId, { regenerate = false, nextCycle = false } = {}) {
       const session = store.getSession(userId, sessionId);
       if (!session) throw new Error('没有找到这场模拟面试');
       if (session.status !== 'completed') throw new Error('请先结束这场模拟面试再生成复盘计划');
       if (!session.turns?.length || !session.report?.answeredQuestions) {
         throw new Error('没有可复盘的回答');
       }
+      if (!session.skillReview && !rankReviewQuestions(session).some(item => item.required)) {
+        throw new Error('当前没有需要重答的薄弱题');
+      }
+      if (nextCycle) {
+        if (!session.skillReview || session.skillReview.version !== REVIEW_VERSION) {
+          throw new Error('请先生成已校验的复习计划');
+        }
+        if (isReviewCoverageComplete(session)) throw new Error('所有必练原题已完成重答，本次基础复习计划已结束');
+        if (!isReviewCycleComplete(session)) throw new Error('请先完成本轮全部练习');
+        if (!rankReviewQuestions(session).some(item => item.required && item.practicedCount === 0)) {
+          throw new Error('当前没有待复习题目');
+        }
+      }
       const key = JSON.stringify([userId, sessionId]);
+      if (nextCycle && practiceInFlight.has(key)) throw new Error('上一份练习正在评估，请稍后重试');
       if (reviewInFlight.has(key)) return reviewInFlight.get(key);
       const upgradingLegacy = regenerate && session.skillReview && session.skillReview.version !== REVIEW_VERSION;
-      if (session.skillReview && !upgradingLegacy) return session;
+      const refreshingCurrent = regenerate && !isReviewCoverageComplete(session) && isOutdatedReviewPlan(session);
+      if (session.skillReview && !upgradingLegacy && !refreshingCurrent && !nextCycle) return session;
       if (upgradingLegacy && session.practiceAttempts?.length) {
         throw new Error('这份计划已有再练习记录，不能更换题目依据');
+      }
+      if (refreshingCurrent && (session.practiceAttempts || []).some(item => (item.cycle || 1) === reviewCycleNumber(session.skillReview) && item.kind !== 'reinforcement')) {
+        throw new Error('本轮已有再练习记录，不能更换题目依据');
       }
       const pending = (async () => {
         const skillReview = await generateReview({
@@ -242,15 +324,21 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
           callJson,
           retrieveKnowledge,
           parseJsonResponse,
-          userId
+          userId,
+          cycle: nextCycle ? reviewCycleNumber(session.skillReview) + 1
+            : refreshingCurrent ? reviewCycleNumber(session.skillReview) : 1
         });
         const latest = store.getSession(userId, sessionId);
         if (!latest) throw new Error('没有找到这场模拟面试');
-        if (latest.skillReview && !upgradingLegacy) return latest;
+        if (nextCycle && reviewCycleNumber(latest.skillReview) !== reviewCycleNumber(session.skillReview)) return latest;
+        if (latest.skillReview && !upgradingLegacy && !refreshingCurrent && !nextCycle) return latest;
         if (upgradingLegacy && latest.practiceAttempts?.length) {
           throw new Error('这份计划已有再练习记录，不能更换题目依据');
         }
-        if (upgradingLegacy && latest.skillReview) {
+        if (refreshingCurrent && (latest.practiceAttempts || []).some(item => (item.cycle || 1) === reviewCycleNumber(latest.skillReview) && item.kind !== 'reinforcement')) {
+          throw new Error('本轮已有再练习记录，不能更换题目依据');
+        }
+        if ((upgradingLegacy || nextCycle) && latest.skillReview) {
           latest.skillReviewHistory = [...(latest.skillReviewHistory || []), latest.skillReview];
         }
         latest.skillReview = skillReview;
@@ -276,16 +364,19 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
       if (!session) throw new Error('没有找到这场模拟面试');
       if (session.status !== 'completed' || !session.skillReview) throw new Error('请先完成面试并生成复习计划');
       if (session.skillReview.version !== REVIEW_VERSION) throw new Error('请先升级旧版复盘计划再练习');
+      const cycle = reviewCycleNumber(session.skillReview);
       const planDay = session.skillReview.days?.find(item => item.day === day);
+      if (!planDay) throw new Error('无效的复习任务');
       const questionNumber = planDay?.evidence?.questionNumber || planDay?.evidenceQuestionNumbers?.[0];
       const originalTurn = session.turns?.[questionNumber - 1];
       if (!originalTurn) throw new Error('复习任务没有有效的原题');
-      if ((session.practiceAttempts || []).some(item => item.day === day && item.answer === answer)) return session;
-      if ((session.practiceAttempts || []).filter(item => item.day === day).length >= 5) {
-        throw new Error('这一天的练习已达到 5 次上限');
+      if ((session.practiceAttempts || []).some(item => (item.cycle || 1) === cycle && item.day === day && item.answer === answer)) return session;
+      if ((session.practiceAttempts || []).filter(item => (item.cycle || 1) === cycle && item.day === day).length >= 5) {
+        throw new Error('这项练习已达到 5 次上限');
       }
 
       const key = JSON.stringify([userId, sessionId]);
+      if (reviewInFlight.has(key)) throw new Error('复习计划正在生成，请稍后重试');
       const answerHash = crypto.createHash('sha256').update(answer).digest('hex');
       const running = practiceInFlight.get(key);
       if (running) {
@@ -305,9 +396,10 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
         const latest = store.getSession(userId, sessionId);
         if (!latest) throw new Error('没有找到这场模拟面试');
         latest.practiceAttempts ||= [];
-        if (latest.practiceAttempts.some(item => item.day === day && item.answer === answer)) return latest;
+        if (latest.practiceAttempts.some(item => (item.cycle || 1) === cycle && item.day === day && item.answer === answer)) return latest;
         latest.practiceAttempts.push({
           id: crypto.randomUUID(),
+          cycle,
           day,
           questionNumber,
           questionText: originalTurn.question.text,
@@ -320,6 +412,71 @@ function createInterviewService({ dataDir, callJson, retrieveKnowledge }) {
         return store.saveSession(userId, latest);
       })();
       practiceInFlight.set(key, { day, answerHash, promise: pending });
+      try {
+        return await pending;
+      } finally {
+        practiceInFlight.delete(key);
+      }
+    },
+
+    async reinforceReview(userId, sessionId, rawQuestionNumber, rawAnswer) {
+      const questionNumber = Number(rawQuestionNumber);
+      const answer = String(rawAnswer || '').trim();
+      if (!Number.isInteger(questionNumber) || questionNumber < 1) throw new Error('无效的原题编号');
+      if (answer.length < 20) throw new Error('练习回答至少需要 20 个字符');
+      if (answer.length > 10_000) throw new Error('练习回答不能超过 10,000 个字符');
+
+      const session = store.getSession(userId, sessionId);
+      if (!session) throw new Error('没有找到这场模拟面试');
+      if (session.status !== 'completed' || session.skillReview?.version !== REVIEW_VERSION) {
+        throw new Error('请先完成面试并生成已校验的复习计划');
+      }
+      if (!isReviewCoverageComplete(session)) throw new Error('请先完成所有必练原题的首次重答');
+      const originalTurn = session.turns?.[questionNumber - 1];
+      if (!originalTurn) throw new Error('无效的原题编号');
+      const previous = (session.practiceAttempts || []).filter(item => item.kind === 'reinforcement' && item.questionNumber === questionNumber);
+      if (previous.some(item => item.answer === answer)) return session;
+      const priority = rankReviewQuestions(session).find(item => item.questionNumber === questionNumber);
+      if (!priority || !needsReinforcement(priority)) throw new Error('这道题当前没有低分或缺口，无需巩固');
+      if (previous.length >= 5) throw new Error('这道题的巩固练习已达到 5 次上限');
+
+      const key = JSON.stringify([userId, sessionId]);
+      if (reviewInFlight.has(key)) throw new Error('复习计划正在生成，请稍后重试');
+      const answerHash = crypto.createHash('sha256').update(answer).digest('hex');
+      const running = practiceInFlight.get(key);
+      if (running) {
+        if (running.kind === 'reinforcement' && running.questionNumber === questionNumber && running.answerHash === answerHash) return running.promise;
+        throw new Error('上一份练习正在评估，请稍后重试');
+      }
+      const pending = (async () => {
+        const target = session.reviewContext || { role: '', jobDescription: '' };
+        const feedback = await evaluateAnswer({
+          session: { ...session, currentQuestion: originalTurn.question },
+          answer,
+          workspace: {
+            profile: { targetRole: target.role },
+            target: { jobDescription: target.jobDescription }
+          }
+        });
+        const latest = store.getSession(userId, sessionId);
+        if (!latest) throw new Error('没有找到这场模拟面试');
+        latest.practiceAttempts ||= [];
+        if (latest.practiceAttempts.some(item => item.kind === 'reinforcement' && item.questionNumber === questionNumber && item.answer === answer)) return latest;
+        latest.practiceAttempts.push({
+          id: crypto.randomUUID(),
+          kind: 'reinforcement',
+          cycle: reviewCycleNumber(latest.skillReview),
+          questionNumber,
+          questionText: originalTurn.question.text,
+          answer,
+          feedback,
+          originalAverageScore: originalTurn.feedback.averageScore,
+          createdAt: new Date().toISOString()
+        });
+        latest.updatedAt = new Date().toISOString();
+        return store.saveSession(userId, latest);
+      })();
+      practiceInFlight.set(key, { kind: 'reinforcement', questionNumber, answerHash, promise: pending });
       try {
         return await pending;
       } finally {

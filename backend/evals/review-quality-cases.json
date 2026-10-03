@@ -44,13 +44,6 @@
         "task": "重答规则冲突问题，给出一个具体的优先级冲突案例。",
         "checkpoint": "能解释选择该优先级的理由。",
         "evidence": { "questionNumber": 2, "quote": "按冲突优先级处理规则覆盖" }
-      },
-      {
-        "day": 3,
-        "focus": "验证复盘",
-        "task": "把发布验证和规则边界串成一次完整项目陈述。",
-        "checkpoint": "能区分已经做过的验证与仍需补充的信息。",
-        "evidence": { "questionNumber": 1, "quote": "决定是否全量上线" }
       }
     ]
   },
@@ -64,7 +57,7 @@
     { "id": "cross-question-day", "category": "citation", "expected": "reject", "patch": { "path": "days.1.task", "value": "结合第 1 题和第 2 题重新组织规则冲突的回答。" } },
     { "id": "garbled-quote", "category": "integrity", "expected": "reject", "patch": { "path": "days.1.evidence.quote", "value": "按冲突优先级�处理规则覆盖" } },
     { "id": "garbled-text", "category": "integrity", "expected": "reject", "patch": { "path": "days.1.task", "value": "分析规则�冲突" } },
-    { "id": "missing-day", "category": "structure", "expected": "reject", "patch": { "path": "days.2", "value": null } }
+    { "id": "missing-day", "category": "structure", "expected": "reject", "patch": { "path": "days.1", "value": null } }
   ],
   "liveCases": [
     { "id": "ordinary-interview", "description": "普通项目复盘" },

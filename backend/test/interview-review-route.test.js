@@ -2,10 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createInterviewHandler } = require('../interview/routes');
 
-function createHarness({ user, reviewSession, practiceReview, body = {} }) {
+function createHarness({ user, reviewSession, practiceReview, reinforceReview, body = {} }) {
   const responses = [];
   const handler = createInterviewHandler({
-    service: { reviewSession, practiceReview },
+    service: { reviewSession, practiceReview, reinforceReview },
     verifyToken: () => user,
     readBody: async () => body,
     sendJson: (_res, body, status = 200) => responses.push({ body, status })
@@ -50,18 +50,12 @@ test('review route uses the verified user ID and returns a public session', asyn
 
   assert.equal(await handler(reviewRequest('session-1'), {}), true);
   assert.deepEqual(calls, [['verified-user', 'session-1']]);
-  assert.deepEqual(responses, [{
-    body: {
-      session: {
-        id: 'session-1',
-        status: 'completed',
-        currentQuestion: { text: '如何验证方案？' },
-        turns: [{ question: { text: '介绍项目' }, answer: '我的回答' }],
-        skillReview: { summary: '补充验证指标' }
-      }
-    },
-    status: 200
-  }]);
+  assert.equal(responses[0].status, 200);
+  assert.equal(responses[0].body.session.id, 'session-1');
+  assert.deepEqual(responses[0].body.session.currentQuestion, { text: '如何验证方案？' });
+  assert.deepEqual(responses[0].body.session.turns, [{ question: { text: '介绍项目' }, answer: '我的回答' }]);
+  assert.equal(responses[0].body.session.skillReview.summary, '补充验证指标');
+  assert.equal(responses[0].body.session.reviewQueue.length, 1);
 });
 
 test('review route returns a validation error when the session is not completed', async () => {
@@ -90,6 +84,21 @@ test('review route forwards explicit legacy upgrade only for a true flag', async
   assert.equal(responses[0].body.session.skillReview.version, 3);
 });
 
+test('review route forwards next-cycle generation with the verified user identity', async () => {
+  const calls = [];
+  const { handler, responses } = createHarness({
+    user: { userId: 'verified-user' },
+    body: { nextCycle: true },
+    reviewSession: async (...args) => {
+      calls.push(args);
+      return { id: 'session-1', turns: [], skillReview: { version: 3, cycle: 2 } };
+    }
+  });
+  await handler(reviewRequest(), {});
+  assert.deepEqual(calls, [['verified-user', 'session-1', { regenerate: false, nextCycle: true }]]);
+  assert.equal(responses[0].body.session.skillReview.cycle, 2);
+});
+
 test('practice route injects the verified user identity and submitted answer', async () => {
   const calls = [];
   const { handler, responses } = createHarness({
@@ -104,4 +113,19 @@ test('practice route injects the verified user identity and submitted answer', a
   assert.deepEqual(calls, [['verified-user', 'session-1', 2, '我补充了明确的指标口径和验证步骤。']]);
   assert.equal(responses[0].status, 200);
   assert.equal(responses[0].body.session.practiceAttempts[0].day, 2);
+});
+
+test('optional reinforcement route uses the verified user identity and original question number', async () => {
+  const calls = [];
+  const { handler, responses } = createHarness({
+    user: { userId: 'verified-user' },
+    body: { questionNumber: 4, answer: '我补充数据来源、对照实验和判断标准。', userId: 'forged-user' },
+    reinforceReview: async (...args) => {
+      calls.push(args);
+      return { id: 'session-1', turns: [], practiceAttempts: [{ kind: 'reinforcement', questionNumber: 4 }] };
+    }
+  });
+  assert.equal(await handler({ method: 'POST', url: '/api/interview/sessions/session-1/review/reinforce' }, {}), true);
+  assert.deepEqual(calls, [['verified-user', 'session-1', 4, '我补充数据来源、对照实验和判断标准。']]);
+  assert.equal(responses[0].body.session.practiceAttempts[0].questionNumber, 4);
 });

@@ -6,20 +6,24 @@ const session = {
   reviewContext: { role: '测试开发工程师', jobDescription: '' },
   report: { gaps: [{ key: 'evidence', label: '事实与指标', score: 2 }] },
   turns: [
-    { answer: '我先做了灰度发布，记录了失败率 12% 和恢复时间，再决定是否全量上线。', feedback: { scores: { evidence: 2 } } },
-    { answer: '我用冲突优先级和回归用例处理规则覆盖问题，没有记录百分比。', feedback: { scores: { evidence: 3 } } }
+    { answer: '我先做了灰度发布，记录了失败率 12% 和恢复时间，再决定是否全量上线。', feedback: { averageScore: 2, scores: { evidence: 2 } } },
+    { answer: '我用冲突优先级和回归用例处理规则覆盖问题，没有记录百分比。', feedback: { averageScore: 3, scores: { evidence: 3 } } }
   ]
 };
 
 function validOutput() {
   return {
     summary: '需要补全效果验证，已回答的失败率为 12%。',
-    days: [1, 2, 3].map(day => ({
+    days: [1, 2].map(day => ({
       day,
       focus: '说明指标来源',
-      task: '围绕原题说明失败率 12% 的统计口径和上线判断。',
+      task: day === 2
+        ? '围绕原题说明规则覆盖问题的处理依据。'
+        : '围绕原题说明失败率 12% 的统计口径和上线判断。',
       checkpoint: '能解释统计时间窗口。',
-      evidence: { questionNumber: 1, quote: '记录了失败率 12% 和恢复时间' }
+      evidence: day === 2
+        ? { questionNumber: 2, quote: '我用冲突优先级和回归用例处理规则覆盖问题' }
+        : { questionNumber: 1, quote: '记录了失败率 12% 和恢复时间' }
     }))
   };
 }
@@ -29,6 +33,7 @@ test('review plan keeps only a verbatim answer quote and grounded metrics', () =
   assert.equal(result.version, 3);
   assert.deepEqual(result.days[0].evidenceQuestionNumbers, [1]);
   assert.equal(result.days[0].evidence.quote, '记录了失败率 12% 和恢复时间');
+  assert.deepEqual(result.selectedQuestionNumbers, [1, 2]);
 });
 
 test('review plan rejects invented metrics and quotes from the wrong question', () => {
@@ -48,11 +53,11 @@ test('review plan rejects invented metrics and quotes from the wrong question', 
 test('each review day rejects question references outside its evidence question', () => {
   const crossQuestion = validOutput();
   crossQuestion.days[1].task = '结合第1题和第2题，重新组织验证方法。';
-  assert.throws(() => normalizeReview(crossQuestion, session), /只能围绕证据对应的第 1 题/);
+  assert.throws(() => normalizeReview(crossQuestion, session), /只能围绕证据对应的第 2 题/);
 
   const qStyle = validOutput();
-  qStyle.days[2].checkpoint = '对照 Q02 检查回答是否完整。';
-  assert.throws(() => normalizeReview(qStyle, session), /只能围绕证据对应的第 1 题/);
+  qStyle.days[1].checkpoint = '对照 Q01 检查回答是否完整。';
+  assert.throws(() => normalizeReview(qStyle, session), /只能围绕证据对应的第 2 题/);
 });
 
 test('review plan rejects replacement characters instead of displaying garbled text', () => {

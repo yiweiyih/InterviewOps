@@ -93,6 +93,28 @@ test('interview service can end an active session before the first answer', asyn
   }
 });
 
+test('interview service deletes completed records but refuses active sessions', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
+  try {
+    const service = createInterviewService({
+      dataDir: tempDir,
+      callJson: async () => ({ text: '请介绍你的项目。', competency: '项目经验', expectedSignals: ['背景'] }),
+      retrieveKnowledge: async () => []
+    });
+    const session = await service.startSession('user-a', { mode: 'project' });
+    assert.throws(() => service.deleteSession('user-a', session.id), /请先结束/);
+    assert.equal(service.deleteSession('user-b', session.id), false);
+
+    service.completeSession('user-a', session.id);
+    assert.equal(service.deleteSession('user-a', session.id), true);
+    assert.equal(service.getSession('user-a', session.id), null);
+    assert.equal(service.listSessions('user-a').length, 0);
+    assert.equal(service.getSummary('user-a').sessions, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('interview service rejects repeated follow-up questions but preserves the target gap', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-service-'));
   let questionCalls = 0;

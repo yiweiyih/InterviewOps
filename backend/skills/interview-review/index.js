@@ -63,12 +63,50 @@ function buildFocusAreas(session) {
   });
 }
 
-function normalizeReview(value, session) {
+function feedbackAverage(feedback) {
+  const average = Number(feedback?.averageScore);
+  if (Number.isFinite(average) && average > 0) return average;
+  const scores = Object.values(feedback?.scores || {}).map(Number).filter(value => Number.isFinite(value) && value > 0);
+  return scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : 5;
+}
+
+function rankReviewQuestions(session) {
+  const attempts = Array.isArray(session.practiceAttempts) ? session.practiceAttempts : [];
+  return (session.turns || []).map((turn, index) => {
+    const questionNumber = index + 1;
+    const practice = attempts.filter(item => item.questionNumber === questionNumber);
+    const latest = practice.at(-1);
+    const feedback = latest?.feedback || turn.feedback || {};
+    const originalScore = feedbackAverage(turn.feedback);
+    const originalGapCount = Array.isArray(turn.feedback?.missingPoints) ? turn.feedback.missingPoints.length : 0;
+    return {
+      questionNumber,
+      originalScore,
+      originalGapCount,
+      required: originalScore < 4 || originalGapCount > 0,
+      currentScore: feedbackAverage(feedback),
+      gapCount: Array.isArray(feedback.missingPoints) ? feedback.missingPoints.length : 0,
+      practicedCount: practice.length
+    };
+  }).sort((left, right) => (
+    Number(!left.required) - Number(!right.required)
+    || Number(left.practicedCount > 0) - Number(right.practicedCount > 0)
+    || left.currentScore - right.currentScore
+    || right.gapCount - left.gapCount
+    || left.questionNumber - right.questionNumber
+  ));
+}
+
+function normalizeReview(value, session, { selectedQuestions = null, cycle = 1 } = {}) {
   const source = value && typeof value === 'object' ? value : {};
   const rawDays = Array.isArray(source.days) ? source.days : [];
-  const days = [1, 2, 3].map(day => {
+  const expectedCount = selectedQuestions?.length ?? Math.min(3, session.turns?.length || 0);
+  if (!expectedCount || rawDays.length !== expectedCount) {
+    throw new Error(`模型必须生成 ${expectedCount} 项复习任务，不能补齐或遗漏原题`);
+  }
+  const days = Array.from({ length: expectedCount }, (_, index) => index + 1).map(day => {
     const raw = rawDays.find(item => Number(item?.day) === day);
-    if (!raw) throw new Error('模型没有生成完整的三天复习计划');
+    if (!raw) throw new Error('模型没有生成完整的本轮复习任务');
     const focus = cleanText(raw.focus, 100);
     const task = cleanText(raw.task, 500);
     const checkpoint = cleanText(raw.checkpoint, 300);
@@ -79,9 +117,12 @@ function normalizeReview(value, session) {
     assertCleanText(quote);
     const answer = session.turns[questionNumber - 1]?.answer;
     if (!Number.isInteger(questionNumber) || !answer) throw new Error('模型没有引用有效的本场题目');
+    if (selectedQuestions && questionNumber !== selectedQuestions[day - 1]) {
+      throw new Error(`第 ${day} 项必须练习服务端选定的第 ${selectedQuestions[day - 1]} 题`);
+    }
     const mentionedQuestions = questionReferences([focus, task, checkpoint].join(' '));
     if (mentionedQuestions.some(number => number !== questionNumber)) {
-      throw new Error(`第 ${day} 天只能围绕证据对应的第 ${questionNumber} 题`);
+      throw new Error(`第 ${day} 项只能围绕证据对应的第 ${questionNumber} 题`);
     }
     if (normalizeEvidenceText(quote).length < 6 ||
       !normalizeEvidenceText(answer).includes(normalizeEvidenceText(quote))) {
@@ -100,6 +141,9 @@ function normalizeReview(value, session) {
       evidenceQuestionNumbers: [questionNumber]
     };
   });
+  if (new Set(days.map(item => item.evidence.questionNumber)).size !== days.length) {
+    throw new Error('本轮复习任务不能重复安排同一道原题');
+  }
   const summary = cleanText(source.summary, 400);
   if (!summary) throw new Error('模型没有生成有效的复盘总结');
   assertCleanText(summary);
@@ -110,16 +154,23 @@ function normalizeReview(value, session) {
   return {
     skill: SKILL_NAME,
     version: REVIEW_VERSION,
+    cycle,
     summary,
     focusAreas: buildFocusAreas(session),
     days,
+    selectedQuestionNumbers: days.map(item => item.evidence.questionNumber),
     generatedAt: new Date().toISOString()
   };
 }
 
-async function generateReview({ session, callJson, retrieveKnowledge, parseJsonResponse, userId }) {
+async function generateReview({ session, callJson, retrieveKnowledge, parseJsonResponse, userId, cycle = 1 }) {
   const startedAt = performance.now();
   const instructions = loadInstructions();
+  const priorityQuestions = rankReviewQuestions(session);
+  if (!priorityQuestions.length) throw new Error('没有可复盘的回答');
+  const selectedQuestions = priorityQuestions.filter(item => item.required && item.practicedCount === 0)
+    .slice(0, 3).map(item => item.questionNumber);
+  if (!selectedQuestions.length) throw new Error('当前没有需要重答的薄弱题，基础复习计划已结束');
   const gaps = (session.report?.gaps || []).map(item => item.label).join(' ');
   const target = session.reviewContext || { role: '', jobDescription: '' };
   let materials = [];
@@ -136,6 +187,8 @@ async function generateReview({ session, callJson, retrieveKnowledge, parseJsonR
       content: JSON.stringify({
         target,
         report: session.report,
+        priorityQuestions,
+        selectedQuestions: selectedQuestions.map((questionNumber, index) => ({ day: index + 1, questionNumber })),
         turns: session.turns.map((turn, index) => ({
           questionNumber: index + 1,
           question: turn.question?.text,
@@ -152,7 +205,7 @@ async function generateReview({ session, callJson, retrieveKnowledge, parseJsonR
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response = await callJson(messages);
     try {
-      const review = normalizeReview(parseJsonResponse(response), session);
+      const review = normalizeReview(parseJsonResponse(response), session, { selectedQuestions, cycle });
       review.generationAttempts = attempt + 1;
       review.latencyMs = Math.round(performance.now() - startedAt);
       return review;
@@ -160,7 +213,7 @@ async function generateReview({ session, callJson, retrieveKnowledge, parseJsonR
       if (attempt === 1) throw error;
       messages.push({
         role: 'user',
-        content: `上次结果未通过服务端证据校验：${error.message}。请重新输出完整 JSON：每天只能绑定一道题，focus、task、checkpoint 和 evidence 必须围绕同一道题，不得提及其他题号；每天提供能在对应原始回答中逐字找到的短句；不得出现回答中没有的百分比或时延数值，也不得包含乱码。`
+        content: `上次结果未通过服务端证据校验：${error.message}。请重新输出完整 JSON：本轮只生成 ${selectedQuestions.length} 项，第 ${selectedQuestions.map((number, index) => `${index + 1} 项对应第 ${number} 题`).join('、')}；不得添加或重复题目。每项只能绑定一道题，focus、task、checkpoint 和 evidence 必须围绕同一道题，不得提及其他题号；每项提供能在对应原始回答中逐字找到的短句；不得出现回答中没有的百分比或时延数值，也不得包含乱码。`
       });
     }
   }
@@ -173,5 +226,6 @@ module.exports = {
   loadInstructions,
   metricTokens,
   normalizeReview,
-  questionReferences
+  questionReferences,
+  rankReviewQuestions
 };

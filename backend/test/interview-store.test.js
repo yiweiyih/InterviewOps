@@ -56,3 +56,22 @@ test('interview store removes untouched legacy frontend defaults', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('deleting a session removes its review data only for the authenticated user', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interview-store-'));
+  try {
+    const store = new InterviewStore(tempDir);
+    store.saveSession('user-a', {
+      id: 'shared-id', status: 'completed', turns: [{ answer: '原回答' }],
+      skillReview: { summary: '复习计划' }, practiceAttempts: [{ answer: '重答' }]
+    });
+    store.saveSession('user-b', { id: 'shared-id', status: 'completed', turns: [{ answer: '其他用户的回答' }] });
+
+    assert.equal(store.deleteSession('user-a', 'shared-id'), true);
+    assert.equal(store.getSession('user-a', 'shared-id'), null);
+    assert.equal(store.deleteSession('user-a', 'shared-id'), false);
+    assert.equal(store.getSession('user-b', 'shared-id').turns[0].answer, '其他用户的回答');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
