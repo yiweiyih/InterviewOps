@@ -9,16 +9,23 @@ import {
   User,
   UserFilled
 } from '@element-plus/icons-vue'
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useChatStore } from './stores/chat'
+import { retryPendingCancels } from './utils/sseClient'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 const isAuthLayout = computed(() => route.meta.layout === 'auth')
+
+onMounted(() => {
+  window.addEventListener('online', retryPendingCancels)
+  retryPendingCancels()
+})
+onUnmounted(() => window.removeEventListener('online', retryPendingCancels))
 
 const navigation = [
   { label: '总览', items: [{ path: '/', label: '备战工作台', icon: HomeFilled }] },

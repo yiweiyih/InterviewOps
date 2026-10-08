@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'interview-ops-active-agent-run-v1'
+const PENDING_CANCEL_KEY = 'interview-ops-pending-agent-cancels-v1'
 export const ACTIVE_RUN_MAX_AGE_MS = 35 * 60 * 1000
 
 function getStorage(storage) {
@@ -55,5 +56,42 @@ export function loadActiveRun(storage, now = Date.now()) {
   } catch {
     clearActiveRun(target)
     return null
+  }
+}
+
+export function loadPendingCancels(storage, now = Date.now()) {
+  try {
+    const target = getStorage(storage)
+    const items = JSON.parse(target?.getItem(PENDING_CANCEL_KEY) || '[]')
+    return Array.isArray(items)
+      ? items.filter(item => typeof item?.requestId === 'string'
+        && typeof item?.url === 'string'
+        && now - Number(item.updatedAt) <= ACTIVE_RUN_MAX_AGE_MS)
+      : []
+  } catch {
+    return []
+  }
+}
+
+export function savePendingCancel(url, requestId, storage, now = Date.now()) {
+  if (!url || !requestId) return
+  try {
+    const target = getStorage(storage)
+    const items = loadPendingCancels(target, now).filter(item => item.requestId !== requestId)
+    items.push({ url, requestId, updatedAt: now })
+    target?.setItem(PENDING_CANCEL_KEY, JSON.stringify(items))
+  } catch {
+    // Cancellation still works while this page is open when storage is unavailable.
+  }
+}
+
+export function clearPendingCancel(requestId, storage) {
+  try {
+    const target = getStorage(storage)
+    const items = loadPendingCancels(target).filter(item => item.requestId !== requestId)
+    if (items.length) target?.setItem(PENDING_CANCEL_KEY, JSON.stringify(items))
+    else target?.removeItem(PENDING_CANCEL_KEY)
+  } catch {
+    // Ignore disabled storage.
   }
 }

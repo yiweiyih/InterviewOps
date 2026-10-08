@@ -14,6 +14,7 @@ const { createInterviewHandler } = require('./interview/routes');
 const { retrieveMemory, extractAndSaveMemories } = require('./memory/index');
 const { getLlmTools, validateToolArguments } = require('./tools/catalog');
 const { createRunManager } = require('./run-manager');
+const { abortError, throwIfAborted } = require('./abort');
 const { asUtf8 } = require('./utf8-stream');
 const {
   normalizeRoute,
@@ -95,21 +96,6 @@ function sendJson(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 
-function withTimeout(promise, timeoutMs, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} 超过 ${timeoutMs}ms`)), timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-function throwIfAborted(signal) {
-  if (!signal?.aborted) return;
-  const error = new Error('任务已取消');
-  error.name = 'AbortError';
-  throw error;
-}
-
 async function observeLlm(operation, request) {
   const startedAt = performance.now();
   try {
@@ -122,7 +108,7 @@ async function observeLlm(operation, request) {
     });
     return response;
   } catch (error) {
-    recordLlm({ operation, status: 'error', durationMs: performance.now() - startedAt });
+    recordLlm({ operation, status: error.name === 'AbortError' ? 'cancelled' : 'error', durationMs: performance.now() - startedAt });
     throw error;
   }
 }
@@ -141,8 +127,9 @@ const handleInterviewRequest = createInterviewHandler({
 const agentRuns = createRunManager();
 
 // ── MCP Client ────────────────────────────────────────────
-function callMcpTool(toolName, args, timeoutMs = 12000) {
+function callMcpTool(toolName, args, timeoutMs = 12000, signal) {
   return new Promise((resolve, reject) => {
+    try { throwIfAborted(signal); } catch (error) { reject(error); return; }
     const body = JSON.stringify({
       jsonrpc: '2.0',
       method: 'tools/call',
@@ -155,6 +142,7 @@ function callMcpTool(toolName, args, timeoutMs = 12000) {
       port: url.port || 80,
       path: url.pathname,
       method: 'POST',
+      signal,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
     };
     const req = http.request(options, (res) => {
@@ -162,6 +150,7 @@ function callMcpTool(toolName, args, timeoutMs = 12000) {
       asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        if (signal?.aborted) { reject(abortError()); return; }
         let json;
         try {
           json = JSON.parse(data);
@@ -233,6 +222,13 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       sendJson(res, { error: error.message }, 400);
     }
+  } else if (req.method === 'POST' && requestUrl.pathname === '/api/agent/runs/cancel') {
+    const user = verifyToken(req);
+    if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
+    const { requestId } = await readBody(req);
+    const run = agentRuns.cancelRequest(String(requestId || '').trim(), user.userId);
+    if (!run) sendJson(res, { error: '缺少或无效的 requestId' }, 400);
+    else sendJson(res, run);
   } else if (req.method === 'GET' && runEventsMatch) {
     const user = verifyToken(req);
     if (!user) { sendJson(res, { error: '未登录' }, 401); return; }
@@ -398,8 +394,9 @@ const PLAN_SYSTEM = `你是一个任务规划助手。判断用户的请求是�
 如果不是复杂任务（普通问答、单步操作），输出：{"tasks":null}
 复杂任务的判断标准：需要3个以上明显独立的步骤、步骤之间有数据依赖关系。`;
 
-function requestDeepSeekJson(payload, label) {
+function requestDeepSeekJson(payload, label, signal) {
   return new Promise((resolve, reject) => {
+    try { throwIfAborted(signal); } catch (error) { reject(error); return; }
     const requestBody = JSON.stringify(payload);
     const url = new URL(API_BASE_URL);
     const options = {
@@ -407,6 +404,7 @@ function requestDeepSeekJson(payload, label) {
       port: url.port || 443,
       path: url.pathname,
       method: 'POST',
+      signal,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -419,6 +417,7 @@ function requestDeepSeekJson(payload, label) {
       asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        if (signal?.aborted) { reject(abortError()); return; }
         let json;
         try { json = JSON.parse(data); }
         catch { reject(new Error(`${label}返回了无效的 JSON`)); return; }
@@ -436,14 +435,14 @@ function requestDeepSeekJson(payload, label) {
   });
 }
 
-function callDeepSeekJSON(messages) {
+function callDeepSeekJSON(messages, signal) {
   return requestDeepSeekJson({
     model: 'deepseek-chat',
     messages,
     max_tokens: 1000,
     temperature: 0.3,
     response_format: { type: 'json_object' }
-  }, 'DeepSeek JSON');
+  }, 'DeepSeek JSON', signal);
 }
 
 // 拓扑排序：按依赖顺序返回任务执行序列
@@ -466,16 +465,19 @@ function topoSort(tasks) {
 }
 
 // 规划入口：返回任务列表或null（普通对话）
-async function planTasks(userMessage) {
+async function planTasks(userMessage, signal) {
   try {
+    throwIfAborted(signal);
     const response = await observeLlm('planner', () => callDeepSeekJSON([
       { role: 'system', content: PLAN_SYSTEM },
       { role: 'user', content: userMessage }
-    ]));
+    ], signal));
+    throwIfAborted(signal);
     const content = response.choices?.[0]?.message?.content;
     const json = typeof content === 'string' ? JSON.parse(content) : content;
     return json?.tasks || null;
   } catch (e) {
+    if (e.name === 'AbortError' || signal?.aborted) throw abortError();
     console.warn('[Planner] 规划失败，降级为普通对话:', e.message);
     return null;
   }
@@ -499,8 +501,17 @@ async function executeTaskNode(task, results, originalMessages, userId, signal) 
   ];
 
   // 用现有的 ReAct 循环执行子任务，收集文本结果
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let collected = '';
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve(collected);
+    };
+    const onAbort = () => finish(abortError());
     const fakeRes = {
       _headers: {},
       _written: false,
@@ -509,12 +520,13 @@ async function executeTaskNode(task, results, originalMessages, userId, signal) 
       setHeader(k, v) { this._headers[k] = v; },
       once() {},
       write(chunk) {
+        if (settled) return;
         const str = typeof chunk === 'string' ? chunk : chunk.toString();
         // 只收集 data: {"content":"..."} 行
         for (const line of str.split('\n')) {
           if (!line.startsWith('data: ')) continue;
           const raw = line.slice(6).trim();
-          if (raw === '[DONE]') { resolve(collected); return; }
+          if (raw === '[DONE]') { finish(); return; }
           try {
             const json = JSON.parse(raw);
             if (json.content) collected += json.content;
@@ -523,10 +535,14 @@ async function executeTaskNode(task, results, originalMessages, userId, signal) 
       },
       end() {
         this.writableEnded = true;
-        resolve(collected);
+        finish();
       }
     };
-    handleWithFunctionCalling(taskMessages, fakeRes, userId, signal).catch(() => resolve(collected));
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { onAbort(); return; }
+    handleWithFunctionCalling(taskMessages, fakeRes, userId, signal).catch(error => {
+      finish(error.name === 'AbortError' || signal?.aborted ? abortError() : null);
+    });
   });
 }
 
@@ -540,12 +556,12 @@ async function handleWithPlanning(messages, res, userId, signal) {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
-  const tasks = await planTasks(lastUserMsg);
+  const tasks = await planTasks(lastUserMsg, signal);
   throwIfAborted(signal);
 
   // 普通对话直接走原有流程
   if (!tasks || tasks.length === 0) {
-    handleWithFunctionCalling(messages, res, userId, signal);
+    await handleWithFunctionCalling(messages, res, userId, signal);
     return;
   }
 
@@ -576,14 +592,17 @@ async function handleWithPlanning(messages, res, userId, signal) {
 
     try {
       results[task.id] = await executeTaskNode(task, results, messages, userId, signal);
+      throwIfAborted(signal);
       if (currentTask) currentTask.status = 'done';
     } catch (e) {
+      if (e.name === 'AbortError' || signal?.aborted) throw abortError();
       results[task.id] = `执行失败: ${e.message}`;
       if (currentTask) currentTask.status = 'error';
     }
     writePlanProgress();
   }
 
+  throwIfAborted(signal);
   // 汇总：把所有子任务结果交给模型做最终整合回答
   const summaryMessages = [
     ...messages,
@@ -596,11 +615,11 @@ async function handleWithPlanning(messages, res, userId, signal) {
   plan.status = 'summarizing';
   writePlanProgress();
   // 最终汇总走流式，但SSE头已设置，传true跳过重复设置
-  handleStreamRequest(summaryMessages, res, true);
+  handleStreamRequest(summaryMessages, res, true, signal);
 }
 
 // 第一轮：带 tools 发给 DeepSeek，让模型决定是否调用工具
-function callDeepSeekWithTools(messages) {
+function callDeepSeekWithTools(messages, signal) {
   return requestDeepSeekJson({
       model: 'deepseek-chat',
       messages,
@@ -608,7 +627,7 @@ function callDeepSeekWithTools(messages) {
       tool_choice: 'auto',
       max_tokens: 4000,
       temperature: 0.7
-    }, 'DeepSeek 工具决策');
+    }, 'DeepSeek 工具决策', signal);
 }
 
 // 完整的 Agent Loop：支持多工具串联，最多 5 轮
@@ -617,12 +636,13 @@ async function handleWithFunctionCalling(messages, res, userId, signal) {
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
   let memoryContext = '';
   try {
-    const memories = await retrieveMemory(lastUserMsg, 5, userId);
+    const memories = await retrieveMemory(lastUserMsg, 5, userId, signal);
     if (memories.length) {
       memoryContext = '\n\n已知用户信息（来自长期记忆）：\n' + memories.map(m => `- ${m.text}`).join('\n');
       console.log(`[Memory] 注入 ${memories.length} 条记忆`);
     }
   } catch (e) {
+    if (e.name === 'AbortError' || signal?.aborted) throw abortError();
     console.warn('[Memory] 检索记忆失败:', e.message);
   }
 
@@ -675,7 +695,8 @@ async function handleWithFunctionCalling(messages, res, userId, signal) {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       throwIfAborted(signal);
       console.log(`[Agent] 第 ${round + 1} 轮：发送给 DeepSeek`);
-      const response = await observeLlm('agent_decision', () => callDeepSeekWithTools(loopMessages));
+      const response = await observeLlm('agent_decision', () => callDeepSeekWithTools(loopMessages, signal));
+      throwIfAborted(signal);
       const choice = response.choices?.[0];
 
       if (choice?.finish_reason !== 'tool_calls' || !choice?.message?.tool_calls?.length) {
@@ -689,11 +710,11 @@ async function handleWithFunctionCalling(messages, res, userId, signal) {
         if (assistantContent && lastUserMsg) {
           const memoryLlm = memoryMessages => observeLlm(
             'memory_extraction',
-            () => callDeepSeekJSON(memoryMessages)
+            () => callDeepSeekJSON(memoryMessages, signal)
           );
-          extractAndSaveMemories(lastUserMsg, assistantContent, memoryLlm, userId).catch(() => {});
+          extractAndSaveMemories(lastUserMsg, assistantContent, memoryLlm, userId, signal).catch(() => {});
         }
-        handleStreamRequest(loopMessages, res, sseStarted);
+        handleStreamRequest(loopMessages, res, sseStarted, signal);
         return;
       }
 
@@ -719,8 +740,10 @@ async function handleWithFunctionCalling(messages, res, userId, signal) {
             let result;
             if (definition.transport === 'local') {
               const ragStartedAt = performance.now();
+              const timeoutSignal = AbortSignal.timeout(definition.timeoutMs);
+              const toolSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
               try {
-                result = await withTimeout(retrieve(toolArgs.query, 3, userId), definition.timeoutMs, `工具 ${toolName}`);
+                result = await retrieve(toolArgs.query, 3, userId, { signal: toolSignal });
                 recordRag({
                   outcome: result.length > 0 ? 'hit' : 'miss',
                   durationMs: performance.now() - ragStartedAt,
@@ -728,12 +751,15 @@ async function handleWithFunctionCalling(messages, res, userId, signal) {
                 });
               } catch (error) {
                 recordRag({ outcome: 'error', durationMs: performance.now() - ragStartedAt, resultCount: 0 });
+                if (signal?.aborted) throw abortError();
+                if (timeoutSignal.aborted) throw new Error(`工具 ${toolName} 超过 ${definition.timeoutMs}ms`);
                 throw error;
               }
             } else {
-              result = await callMcpTool(toolName, toolArgs, definition.timeoutMs);
+              result = await callMcpTool(toolName, toolArgs, definition.timeoutMs, signal);
             }
 
+            throwIfAborted(signal);
             if (toolName === 'retrieve_knowledge' && Array.isArray(result)) citations.push(...result);
 
             function buildResultSummary(name, toolResult) {
@@ -763,6 +789,7 @@ async function handleWithFunctionCalling(messages, res, userId, signal) {
         })
       );
 
+      throwIfAborted(signal);
       // 将结果映射为统一格式，失败的工具注入错误信息让模型做语义级降级
       const toolResults = settledResults.map((settled, i) => {
         const toolName = toolCalls[i].function.name;
@@ -787,18 +814,21 @@ async function handleWithFunctionCalling(messages, res, userId, signal) {
 
     // 超出最大轮数，直接流式输出当前上下文
     console.warn('[Agent] 达到最大轮数限制，强制输出');
-    handleStreamRequest(loopMessages, res, sseStarted);
+    handleStreamRequest(loopMessages, res, sseStarted, signal);
   } catch (err) {
+    if (err.name === 'AbortError' || signal?.aborted) throw abortError();
     console.warn('[Agent] 异常，降级为普通对话:', err.message);
-    handleStreamRequest([systemMessage, ...messages], res, sseStarted);
+    handleStreamRequest([systemMessage, ...messages], res, sseStarted, signal);
   }
 }
 
 // 处理流式请求
-function handleStreamRequest(messages, res, headersAlreadySet = false) {
+function handleStreamRequest(messages, res, headersAlreadySet = false, signal) {
+  throwIfAborted(signal);
   const llmStartedAt = performance.now();
   let completed = false;
   let usage = {};
+  let abortRequest;
 
   const requestBody = {
     model: 'deepseek-chat',
@@ -843,6 +873,7 @@ function handleStreamRequest(messages, res, headersAlreadySet = false) {
   function finish(status, errorMessage) {
     if (completed) return;
     completed = true;
+    signal?.removeEventListener('abort', abortRequest);
     recordStream(status);
     if (res.writableEnded || res.destroyed) return;
     if (errorMessage) res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
@@ -906,13 +937,21 @@ function handleStreamRequest(messages, res, headersAlreadySet = false) {
     maasReq.destroy();
   });
 
+  abortRequest = () => {
+    maasReq.destroy();
+    finish('cancelled');
+  };
+  signal?.addEventListener('abort', abortRequest, { once: true });
+
   res.once('close', () => {
     if (completed) return;
     completed = true;
+    signal?.removeEventListener('abort', abortRequest);
     recordStream('cancelled');
     maasReq.destroy();
   });
 
+  if (signal?.aborted) { abortRequest(); return; }
   maasReq.write(JSON.stringify(requestBody));
   maasReq.end();
 }

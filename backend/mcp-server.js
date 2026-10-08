@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { getMcpTools, validateToolArguments } = require('./tools/catalog');
 const { asUtf8 } = require('./utf8-stream');
+const { abortError, throwIfAborted } = require('./abort');
 
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
@@ -46,8 +47,9 @@ function writeNotes(userId, notes) {
 const TOOLS = getMcpTools();
 
 // ── 网络搜索 ──────────────────────────────────────────────
-function searchWeb(query) {
+function searchWeb(query, signal) {
   return new Promise((resolve, reject) => {
+    try { throwIfAborted(signal); } catch (error) { reject(error); return; }
     if (!SERPER_API_KEY) {
       reject(new Error('SERPER_API_KEY 未配置，网络搜索工具不可用'));
       return;
@@ -58,6 +60,7 @@ function searchWeb(query) {
       hostname: 'google.serper.dev',
       path: '/search',
       method: 'POST',
+      signal,
       headers: {
         'X-API-KEY': SERPER_API_KEY,
         'Content-Type': 'application/json',
@@ -69,6 +72,7 @@ function searchWeb(query) {
       asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        if (signal?.aborted) { reject(abortError()); return; }
         try {
           const json = JSON.parse(data);
           const results = (json.organic || []).slice(0, 5).map(item => ({
@@ -90,16 +94,18 @@ function searchWeb(query) {
 }
 
 // ── 天气查询 ──────────────────────────────────────────────
-function fetchWeather(city) {
+function fetchWeather(city, signal) {
   return new Promise((resolve, reject) => {
+    try { throwIfAborted(signal); } catch (error) { reject(error); return; }
     const encodedCity = encodeURIComponent(city);
     const url = `https://wttr.in/${encodedCity}?format=j1`;
 
-    const req = https.get(url, { headers: { 'User-Agent': 'curl/7.68.0' } }, (res) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'curl/7.68.0' }, signal }, (res) => {
       let data = '';
       asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        if (signal?.aborted) { reject(abortError()); return; }
         try {
           const json = JSON.parse(data);
           const current = json.current_condition[0];
@@ -130,7 +136,8 @@ function fetchWeather(city) {
 }
 
 // ── JSON-RPC 2.0 处理 ─────────────────────────────────────
-async function handleRpc(method, params) {
+async function handleRpc(method, params, signal) {
+  throwIfAborted(signal);
   switch (method) {
     case 'initialize':
       return {
@@ -149,13 +156,15 @@ async function handleRpc(method, params) {
       if (name === 'get_weather') {
         if (!args?.city) throw { code: -32602, message: '缺少参数: city' };
         console.log('[MCP] 调用 get_weather');
-        const weather = await fetchWeather(args.city);
+        const weather = await fetchWeather(args.city, signal);
+        throwIfAborted(signal);
         console.log('[MCP] get_weather 执行成功');
         return { content: [{ type: 'text', text: JSON.stringify(weather) }] };
       } else if (name === 'search_web') {
         if (!args?.query) throw { code: -32602, message: '缺少参数: query' };
         console.log('[MCP] 调用 search_web');
-        const result = await searchWeb(args.query);
+        const result = await searchWeb(args.query, signal);
+        throwIfAborted(signal);
         console.log('[MCP] search_web 执行成功');
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } else if (name === 'get_todos') {
@@ -220,11 +229,19 @@ app.post('/mcp', async (req, res) => {
     return res.json({ jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid Request' } });
   }
 
+  const controller = new AbortController();
+  res.once('close', () => {
+    if (!res.writableEnded) controller.abort();
+  });
+
   try {
-    const result = await handleRpc(method, params);
-    res.json({ jsonrpc: '2.0', id, result });
+    const result = await handleRpc(method, params, controller.signal);
+    if (!res.destroyed) res.json({ jsonrpc: '2.0', id, result });
   } catch (err) {
-    const error = err.code ? err : { code: -32603, message: err.message || 'Internal error' };
+    if (res.destroyed) return;
+    const error = err.name === 'AbortError'
+      ? { code: -32800, message: 'Request cancelled' }
+      : err.code ? err : { code: -32603, message: err.message || 'Internal error' };
     res.json({ jsonrpc: '2.0', id, error });
   }
 });
@@ -239,7 +256,11 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`MCP Server running on http://localhost:${PORT}`);
-  console.log(`Tools: ${TOOLS.map(t => t.name).join(', ')}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`MCP Server running on http://localhost:${PORT}`);
+    console.log(`Tools: ${TOOLS.map(t => t.name).join(', ')}`);
+  });
+}
+
+module.exports = { app };

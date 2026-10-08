@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { extractDocumentText } = require('../documents/extract-text');
 const { asUtf8 } = require('../utf8-stream');
+const { abortError, throwIfAborted } = require('../abort');
 require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
@@ -86,13 +87,15 @@ function chunkText(text, chunkSize = 500, overlap = 50) {
   return chunks;
 }
 
-function getEmbedding(input) {
+function getEmbedding(input, signal) {
   return new Promise((resolve, reject) => {
+    try { throwIfAborted(signal); } catch (error) { reject(error); return; }
     const body = JSON.stringify({ model: EMBED_MODEL, input, encoding_format: 'float' });
     const options = {
       hostname: 'api.siliconflow.cn',
       path: '/v1/embeddings',
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SF_API_KEY}`,
@@ -104,6 +107,7 @@ function getEmbedding(input) {
       asUtf8(res);
       res.on('data', c => data += c);
       res.on('end', () => {
+        if (signal?.aborted) { reject(abortError()); return; }
         try {
           const json = JSON.parse(data);
           if (json.error) return reject(new Error(json.error.message || JSON.stringify(json.error)));
@@ -191,7 +195,8 @@ function reciprocalRankFusion(rankings, itemCount, rrfK = RRF_K) {
   return scores;
 }
 
-function rerankDocuments(query, candidates, topK) {
+function rerankDocuments(query, candidates, topK, signal) {
+  throwIfAborted(signal);
   if (!RERANK_ENABLED || !SF_API_KEY || candidates.length === 0) return Promise.resolve(null);
 
   return new Promise((resolve, reject) => {
@@ -206,6 +211,7 @@ function rerankDocuments(query, candidates, topK) {
       hostname: 'api.siliconflow.cn',
       path: '/v1/rerank',
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SF_API_KEY}`,
@@ -217,6 +223,7 @@ function rerankDocuments(query, candidates, topK) {
       asUtf8(res);
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        if (signal?.aborted) { reject(abortError()); return; }
         try {
           const json = JSON.parse(data);
           if (res.statusCode < 200 || res.statusCode >= 300 || json.error) {
@@ -271,11 +278,13 @@ async function ingestFile(filePath, fileName, userId, options = {}) {
   return ingestText(text, fileName, userId, options);
 }
 
-async function retrieve(query, topK = 3, userId) {
+async function retrieve(query, topK = 3, userId, { signal } = {}) {
+  throwIfAborted(signal);
   if (!userId) return [];
   const store = loadStore().filter(item => item.userId === userId);
   if (!store.length) return [];
-  const queryVector = await getEmbedding(query);
+  const queryVector = await getEmbedding(query, signal);
+  throwIfAborted(signal);
   const limit = Math.max(1, toPositiveInteger(topK, 3));
   const vectorScores = store.map(item => cosineSimilarity(queryVector, item.vector));
   const keywordScores = calculateBm25Scores(query, store.map(item => item.text));
@@ -308,11 +317,13 @@ async function retrieve(query, topK = 3, userId) {
 
   let reranked = null;
   try {
-    reranked = await rerankDocuments(query, candidates, limit);
+    reranked = await rerankDocuments(query, candidates, limit, signal);
   } catch (error) {
+    if (signal?.aborted) throw abortError();
     console.warn(`[RAG] Rerank 降级为 Hybrid Search: ${error.message}`);
   }
 
+  throwIfAborted(signal);
   const rerankedCandidates = reranked
     ? reranked
       .map(result => {

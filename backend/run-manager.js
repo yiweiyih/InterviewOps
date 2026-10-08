@@ -69,6 +69,7 @@ function createRunManager(options = {}) {
   const maxEvents = options.maxEvents || 10000;
   const runs = new Map();
   const requests = new Map();
+  const cancelledRequests = new Map();
   const keyFor = (userId, requestId) => userId + ':' + requestId;
   const publicRun = (run, reused = false) => ({
     runId: run.id, status: run.status, lastSeq: run.lastSeq, reused
@@ -140,7 +141,13 @@ function createRunManager(options = {}) {
     runs.set(run.id, run);
     requests.set(requestKey, run.id);
 
+    if (cancelledRequests.has(requestKey)) {
+      finishRun(run, 'cancelled');
+      return publicRun(run);
+    }
+
     queueMicrotask(async () => {
+      if (run.status !== 'running') return;
       try {
         await execute(run.sink, run.abortController.signal);
       } catch (error) {
@@ -202,11 +209,20 @@ function createRunManager(options = {}) {
     const run = getRun(runId, userId);
     if (!run) return null;
     if (!TERMINAL.has(run.status)) {
+      cancelledRequests.set(keyFor(userId, run.requestId), Date.now());
+      finishRun(run, 'cancelled');
       run.abortController.abort();
       run.sink.destroy();
-      finishRun(run, 'cancelled');
     }
     return publicRun(run);
+  }
+
+  function cancelRequest(requestId, userId) {
+    if (!userId || !requestId || requestId.length > 128) return null;
+    const requestKey = keyFor(userId, requestId);
+    cancelledRequests.set(requestKey, Date.now());
+    const runId = requests.get(requestKey);
+    return runId ? cancelRun(runId, userId) : { runId: null, status: 'cancelled' };
   }
 
   const cleanupTimer = setInterval(() => {
@@ -216,6 +232,9 @@ function createRunManager(options = {}) {
       runs.delete(runId);
       requests.delete(keyFor(run.userId, run.requestId));
     }
+    for (const [requestKey, cancelledAt] of cancelledRequests) {
+      if (now - cancelledAt >= ttlMs) cancelledRequests.delete(requestKey);
+    }
   }, Math.min(ttlMs, 60 * 1000));
   cleanupTimer.unref?.();
 
@@ -224,6 +243,7 @@ function createRunManager(options = {}) {
     getRun,
     subscribe,
     cancelRun,
+    cancelRequest,
     appendEvent,
     finishRun,
     stop() {

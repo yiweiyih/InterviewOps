@@ -91,3 +91,44 @@ test('runs are user scoped and cancellation is terminal', async t => {
   assert.equal(cancelled.status, 'cancelled');
   assert.equal(manager.getRun(created.runId, 'user-a').events.at(-1).type, 'done');
 });
+
+test('cancel by request id prevents an in-flight create from starting work', async t => {
+  const manager = createRunManager();
+  t.after(() => manager.stop());
+  let executions = 0;
+
+  assert.deepEqual(manager.cancelRequest('request-early', 'user-a'), {
+    runId: null,
+    status: 'cancelled'
+  });
+  const created = manager.createRun({
+    userId: 'user-a',
+    requestId: 'request-early',
+    execute() { executions++; }
+  });
+  await nextTurn();
+
+  assert.equal(created.status, 'cancelled');
+  assert.equal(executions, 0);
+  assert.equal(manager.getRun(created.runId, 'user-a').events.at(-1).type, 'done');
+  assert.equal(manager.getRun(created.runId, 'user-b'), null);
+});
+
+test('cancel remains terminal when an active stream closes during abort', async t => {
+  const manager = createRunManager();
+  t.after(() => manager.stop());
+  const created = manager.createRun({
+    userId: 'user-a',
+    requestId: 'request-stream',
+    execute(sink, signal) {
+      signal.addEventListener('abort', () => sink.end('data: [DONE]\n\n'), { once: true });
+      return new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    }
+  });
+  await nextTurn();
+
+  const cancelled = manager.cancelRequest('request-stream', 'user-a');
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(manager.getRun(created.runId, 'user-a').status, 'cancelled');
+  assert.deepEqual(manager.getRun(created.runId, 'user-a').events.map(item => item.type), ['done']);
+});

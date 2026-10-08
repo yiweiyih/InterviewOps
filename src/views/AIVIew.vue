@@ -8,8 +8,8 @@ const MarkdownRenderer = defineAsyncComponent(() =>
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useChatStore } from '../stores/chat'
 import { useTodoStore } from '../stores/todo'
-import { streamChat } from '../utils/sseClient'
-import { clearActiveRun, loadActiveRun, saveActiveRun } from '../utils/agentRunState'
+import { retryPendingCancels, streamChat } from '../utils/sseClient'
+import { clearActiveRun, loadActiveRun, loadPendingCancels, saveActiveRun } from '../utils/agentRunState'
 import { apiUrl } from '../utils/api'
 
 const chatStore = useChatStore()
@@ -284,7 +284,11 @@ const runGeneration = async (
     clearActiveRun()
     if (aiReply.plan) aiReply.plan.status = err.name === 'AbortError' ? 'interrupted' : 'error'
     aiReply.status = 'interrupted'
-    if (err.name !== 'AbortError') {
+    if (err.cancelPending) {
+      ElMessage.warning('取消请求暂未送达，恢复网络后会自动重试')
+    } else if (err.cancelResult?.status === 'completed') {
+      ElMessage.warning('停止请求到达时任务已完成，已执行的操作不会撤销')
+    } else if (err.name !== 'AbortError') {
       ElMessage.error(err.message || failureMessage)
     }
   } finally {
@@ -338,6 +342,7 @@ const handleRegenerate = async (msgId) => {
 
 onMounted(async () => {
   chatStore.initFromStorage()
+  await retryPendingCancels()
   const activeRun = loadActiveRun()
   if (activeRun) {
     const session = chatStore.sessions.get(activeRun.sessionId)
@@ -345,6 +350,13 @@ onMounted(async () => {
       message => message.id === activeRun.assistantMessageId
     )
     if (session && aiReply) {
+      if (loadPendingCancels().some(item => item.requestId === activeRun.requestId)) {
+        aiReply.status = 'interrupted'
+        chatStore.saveToStorage()
+        clearActiveRun()
+        ElMessage.warning('取消请求暂未送达，恢复网络后会自动重试')
+        return
+      }
       chatStore.setCurrentSession(activeRun.sessionId)
       nextTick(scrollToBottom)
       const apiMessages = buildApiMessages(

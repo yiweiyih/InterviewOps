@@ -1,10 +1,12 @@
 import { createSseParser } from './sseParser.js'
 import { getAuthToken } from './api.js'
+import { clearPendingCancel, loadPendingCancels, savePendingCancel } from './agentRunState.js'
 
 const MAX_CREATE_ATTEMPTS = 3
 const MAX_RECONNECT_ATTEMPTS = 5
 const BASE_DELAY = 1000
 const MAX_DELAY = 30000
+let pendingRetry = null
 
 function calcBackoffDelay(attempt) {
   const delay = Math.min(BASE_DELAY * Math.pow(2, attempt - 1), MAX_DELAY)
@@ -18,13 +20,20 @@ function createRequestId() {
 
 function wait(delay, signal) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, delay)
-    signal?.addEventListener('abort', () => {
+    let timer
+    const onAbort = () => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
       const error = new Error('任务已取消')
       error.name = 'AbortError'
       reject(error)
-    }, { once: true })
+    }
+    if (signal?.aborted) { onAbort(); return }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delay)
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -66,16 +75,30 @@ async function createRun(url, messages, requestId, signal) {
   }
 }
 
-async function cancelRun(url, runId) {
-  try {
-    await fetch(url + '/' + encodeURIComponent(runId) + '/cancel', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + getAuthToken() },
-      keepalive: true
-    })
-  } catch {
-    // Best effort: cancellation must not hide the original AbortError.
-  }
+async function cancelRun(url, requestId) {
+  savePendingCancel(url, requestId)
+  const response = await fetch(url + '/cancel', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + getAuthToken()
+    },
+    body: JSON.stringify({ requestId }),
+    keepalive: true,
+    signal: AbortSignal.timeout(5000)
+  })
+  if (!response.ok) throw buildHttpError(response, await response.json().catch(() => ({})))
+  clearPendingCancel(requestId)
+  return response.json().catch(() => ({}))
+}
+
+export async function retryPendingCancels() {
+  if (!getAuthToken()) return
+  if (pendingRetry) return pendingRetry
+  const pending = loadPendingCancels()
+  pendingRetry = Promise.allSettled(pending.map(item => cancelRun(item.url, item.requestId)))
+    .finally(() => { pendingRetry = null })
+  return pendingRetry
 }
 
 async function consumeEvents(url, runId, state, handlers, signal) {
@@ -114,6 +137,11 @@ async function consumeEvents(url, runId, state, handlers, signal) {
 
     if (event === 'done') {
       completed = true
+      if (json.status === 'cancelled') {
+        terminalError = new Error('任务已取消')
+        terminalError.name = 'AbortError'
+        terminalError.remoteCancelled = true
+      }
     } else if (event === 'error' || json.error) {
       terminalError = new Error(json.error || '任务执行失败')
       terminalError.terminal = true
@@ -206,7 +234,13 @@ export async function streamChat(
       }
     }
   } catch (error) {
-    if (error.name === 'AbortError' && runId) await cancelRun(url, runId)
+    if (error.name === 'AbortError' && !error.remoteCancelled) {
+      try {
+        error.cancelResult = await cancelRun(url, requestId)
+      } catch {
+        error.cancelPending = true
+      }
+    }
     throw error
   }
 }

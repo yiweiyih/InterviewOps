@@ -15,6 +15,15 @@ function streamResponse(text) {
   }
 }
 
+function createStorage() {
+  const values = new Map()
+  return {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  }
+}
+
 test('reconnects with Last-Event-ID and ignores replayed message deltas', async t => {
   const originalFetch = globalThis.fetch
   const originalLocalStorage = globalThis.localStorage
@@ -116,4 +125,82 @@ test('resumes a saved run after refresh without creating a second task', async t
   assert.deepEqual(chunks, ['继续'])
   assert.deepEqual(checkpoints.map(item => item.lastSeq), [3, 4, 5])
   assert.ok(checkpoints.every(item => item.runId === 'run_saved'))
+})
+
+test('stopping before the create response cancels by request id', async t => {
+  const originalFetch = globalThis.fetch
+  const originalLocalStorage = globalThis.localStorage
+  const originalSessionStorage = globalThis.sessionStorage
+  globalThis.localStorage = { getItem: () => JSON.stringify({ token: 'test-token' }) }
+  globalThis.sessionStorage = createStorage()
+  const controller = new AbortController()
+  let cancelBody
+  let createStarted
+  const started = new Promise(resolve => { createStarted = resolve })
+
+  globalThis.fetch = (url, options) => {
+    if (url === '/api/agent/runs') {
+      createStarted()
+      return new Promise((_, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), { once: true })
+      })
+    }
+    cancelBody = JSON.parse(options.body)
+    return Promise.resolve({ ok: true, json: async () => ({ status: 'cancelled' }) })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+    globalThis.sessionStorage = originalSessionStorage
+  })
+
+  const { streamChat } = await import('../src/utils/sseClient.js')
+  const { loadPendingCancels } = await import('../src/utils/agentRunState.js')
+  const task = streamChat('/api/agent/runs', [], () => {}, controller.signal)
+  await started
+  controller.abort()
+
+  await assert.rejects(task, { name: 'AbortError' })
+  assert.equal(typeof cancelBody.requestId, 'string')
+  assert.deepEqual(loadPendingCancels(), [])
+})
+
+test('failed cancel is saved and retried after the network returns', async t => {
+  const originalFetch = globalThis.fetch
+  const originalLocalStorage = globalThis.localStorage
+  const originalSessionStorage = globalThis.sessionStorage
+  globalThis.localStorage = { getItem: () => JSON.stringify({ token: 'test-token' }) }
+  globalThis.sessionStorage = createStorage()
+  const controller = new AbortController()
+  let eventsStarted
+  const started = new Promise(resolve => { eventsStarted = resolve })
+  globalThis.fetch = (url, options) => {
+    if (url === '/api/agent/runs') {
+      return Promise.resolve({ ok: true, json: async () => ({ runId: 'run-offline' }) })
+    }
+    if (url.endsWith('/events')) {
+      eventsStarted()
+      return new Promise((_, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), { once: true })
+      })
+    }
+    return Promise.reject(new TypeError('offline'))
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+    globalThis.sessionStorage = originalSessionStorage
+  })
+
+  const { streamChat, retryPendingCancels } = await import('../src/utils/sseClient.js')
+  const { loadPendingCancels } = await import('../src/utils/agentRunState.js')
+  const task = streamChat('/api/agent/runs', [], () => {}, controller.signal)
+  await started
+  controller.abort()
+  await assert.rejects(task, error => error.name === 'AbortError' && error.cancelPending)
+  assert.equal(loadPendingCancels().length, 1)
+
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'cancelled' }) })
+  await retryPendingCancels()
+  assert.deepEqual(loadPendingCancels(), [])
 })

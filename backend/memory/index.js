@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { asUtf8 } = require('../utf8-stream');
+const { abortError, throwIfAborted } = require('../abort');
 require('dotenv').config({ path: path.join(__dirname, '../.env'), quiet: true });
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
@@ -19,13 +20,15 @@ function saveStore(memories) {
   fs.writeFileSync(STORE_PATH, JSON.stringify(memories, null, 2));
 }
 
-function getEmbedding(input) {
+function getEmbedding(input, signal) {
   return new Promise((resolve, reject) => {
+    try { throwIfAborted(signal); } catch (error) { reject(error); return; }
     const body = JSON.stringify({ model: EMBED_MODEL, input, encoding_format: 'float' });
     const options = {
       hostname: 'api.siliconflow.cn',
       path: '/v1/embeddings',
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SF_API_KEY}`,
@@ -37,6 +40,7 @@ function getEmbedding(input) {
       asUtf8(res);
       res.on('data', c => data += c);
       res.on('end', () => {
+        if (signal?.aborted) { reject(abortError()); return; }
         try {
           const json = JSON.parse(data);
           if (json.error) return reject(new Error(json.error.message));
@@ -61,21 +65,25 @@ function cosineSimilarity(a, b) {
 }
 
 // 写入一条记忆，同key的旧记忆会被覆盖
-async function saveMemory(key, value, userId) {
+async function saveMemory(key, value, userId, signal) {
+  throwIfAborted(signal);
   if (!userId) throw new Error('缺少用户身份，拒绝写入长期记忆');
   const store = loadStore().filter(m => !(m.key === key && m.userId === userId));
   const text = `${key}：${value}`;
-  const vector = await getEmbedding(text);
+  const vector = await getEmbedding(text, signal);
+  throwIfAborted(signal);
   store.push({ key, value, text, vector, userId, updatedAt: new Date().toISOString() });
   saveStore(store);
 }
 
 // 按相关性检索记忆，返回Top-K
-async function retrieveMemory(query, topK = 5, userId) {
+async function retrieveMemory(query, topK = 5, userId, signal) {
+  throwIfAborted(signal);
   if (!userId) return [];
   const store = loadStore().filter(m => m.userId === userId);
   if (!store.length) return [];
-  const queryVector = await getEmbedding(query);
+  const queryVector = await getEmbedding(query, signal);
+  throwIfAborted(signal);
   return store
     .map(m => ({ key: m.key, value: m.value, text: m.text, score: cosineSimilarity(queryVector, m.vector) }))
     .sort((a, b) => b.score - a.score)
@@ -84,8 +92,9 @@ async function retrieveMemory(query, topK = 5, userId) {
 }
 
 // 对话结束后自动提取用户事实，调用方传入 callLLM 函数避免循环依赖
-async function extractAndSaveMemories(userMsg, assistantReply, callLLM, userId) {
+async function extractAndSaveMemories(userMsg, assistantReply, callLLM, userId, signal) {
   try {
+    throwIfAborted(signal);
     const response = await callLLM([
       {
         role: 'system',
@@ -105,12 +114,14 @@ async function extractAndSaveMemories(userMsg, assistantReply, callLLM, userId) 
     const facts = json?.facts || [];
 
     for (const fact of facts) {
+      throwIfAborted(signal);
       if (fact.confidence >= 0.7) {
-        await saveMemory(fact.key, fact.value, userId);
+        await saveMemory(fact.key, fact.value, userId, signal);
         console.log('[Memory] 保存用户记忆成功');
       }
     }
   } catch (e) {
+    if (e.name === 'AbortError' || signal?.aborted) return;
     console.warn('[Memory] 提取记忆失败:', e.message);
   }
 }
